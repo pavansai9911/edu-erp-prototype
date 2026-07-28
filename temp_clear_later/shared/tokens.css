@@ -1,0 +1,111 @@
+/* ============================================================================
+   NextGen EduERP — Prototype Design Tokens
+   shared/tokens.css  |  M3 Design System · 6 themes × light/dark
+   Layer 1 primitives → Layer 2 semantic → Layer 3 mode. Chart colors are
+   SEMANTIC and FIXED (green=good, red=bad) — independent of the brand theme.
+   ============================================================================ */
+
+:root{
+  /* ---- neutral ramp (shared by all themes) ---- */
+  --gray-0:#FFFFFF; --gray-25:#FCFCFD; --gray-50:#F8F9FB; --gray-100:#F1F2F6;
+  --gray-200:#E6E8EF; --gray-300:#D2D6E0; --gray-400:#A9AFC0; --gray-500:#7C8299;
+  --gray-600:#565C72; --gray-700:#3B4056; --gray-800:#262A3B; --gray-900:#14121F;
+  --gray-950:#0B0A14;
+
+  /* ---- type ---- */
+  --f-display:"Sora",system-ui,-apple-system,sans-serif;
+  --f-body:"Inter",system-ui,-apple-system,sans-serif;
+  --f-mono:"JetBrains Mono",ui-monospace,monospace;
+
+  /* ---- spacing (4px base) ---- */
+  --sp-1:4px; --sp-2:8px; --sp-3:12px; --sp-4:16px; --sp-5:20px; --sp-6:24px;
+  --sp-8:32px; --sp-10:40px; --sp-12:48px; --sp-16:64px;
+
+  /* ---- radius ---- */
+  --r-xs:6px; --r-sm:10px; --r-md:14px; --r-lg:18px; --r-xl:24px; --r-pill:999px;
+
+  /* ---- motion ---- */
+  --m-fast:120ms; --m-base:200ms; --m-slow:320ms;
+  --e-standard:cubic-bezier(.2,.8,.2,1);
+  --e-decelerate:cubic-bezier(0,.7,.3,1);
+  --e-accelerate:cubic-bezier(.4,0,1,1);
+
+  /* ---- type scale ---- */
+  --t-display-lg:32px; --t-display:28px; --t-h1:24px; --t-h2:20px; --t-h3:16px;
+  --t-body:14px; --t-label:13px; --t-caption:12px;
+
+  /* ============================================================
+     SEMANTIC DATA-VISUALIZATION COLORS — FIXED across all themes.
+     Tied to MEANING, never to the brand theme. (Your issue #3.)
+     ============================================================ */
+  --viz-positive:#22B85F;   /* good / paid / present / up      */
+  --viz-negative:#E5484D;   /* bad / overdue / absent / down   */
+  --viz-neutral:#7C8299;    /* baseline / no-change            */
+  --viz-warning:#F5A524;    /* partial / at-risk               */
+  /* categorical set for comparisons (colorblind-conscious ordering) */
+  --viz-1:#4F7CFF; --viz-2:#22B8A2; --viz-3:#F5A524; --viz-4:#A97CFF;
+  --viz-5:#F06595; --viz-6:#59C2E8; --viz-7:#7BC96F; --viz-8:#E8863B;
+}
+
+/* ============================================================================
+   SEMANTIC TOKENS — resolved per MODE (light default / dark override)
+   Neutrals + intents swap by mode. Brand is set by THEME (further below).
+   ============================================================================ */
+:root, [data-mode="light"]{
+  --bg-app:var(--gray-50); --surface:var(--gray-0); --surface-alt:var(--gray-50);
+  --surface-sunken:var(--gray-100);
+  --border-subtle:var(--gray-200); --border-strong:var(--gray-300);
+  --text-primary:var(--gray-900); --text-secondary:var(--gray-600);
+  --text-tertiary:var(--gray-500); --text-on-brand:#FFFFFF;
+  --overlay:rgba(20,18,31,.45);
+  --success:#1F9D57; --success-subtle:#E7F6EE;
+  --warning:#B4700F; --warning-subtle:#FFF3DC;
+  --danger:#D93A3F;  --danger-subtle:#FDECEC;
+  --info:#3E63DD;    --info-subtle:#EAF0FF;
+  --shadow-1:0 1px 3px rgba(20,18,31,.06),0 1px 2px rgba(20,18,31,.04);
+  --shadow-2:0 4px 12px rgba(20,18,31,.08),0 2px 4px rgba(20,18,31,.05);
+  --shadow-3:0 12px 28px rgba(20,18,31,.14);
+  --shadow-header:0 1px 0 rgba(20,18,31,.04);
+  --skeleton-base:var(--gray-100); --skeleton-shine:var(--gray-200);
+  /* header text/controls on a brand-colored bar */
+  --on-header:#FFFFFF; --on-header-dim:rgba(255,255,255,.72);
+  --header-control:rgba(255,255,255,.16); --header-control-active:rgba(255,255,255,.26);
+}
+[data-mode="dark"]{
+  --bg-app:var(--gray-950); --surface:var(--gray-900); --surface-alt:var(--gray-800);
+  --surface-sunken:#05040A;
+  --border-subtle:#23283A; --border-strong:var(--gray-700);
+  --text-primary:var(--gray-50); --text-secondary:var(--gray-400);
+  --text-tertiary:var(--gray-500); --text-on-brand:#FFFFFF;
+  --overlay:rgba(0,0,0,.62);
+  --success:#3DD68C; --success-subtle:#123726;
+  --warning:#FFC670; --warning-subtle:#3A2E12;
+  --danger:#FF6369;  --danger-subtle:#3A1B1D;
+  --info:#7C9CFF;    --info-subtle:#1B2547;
+  --shadow-1:0 1px 3px rgba(0,0,0,.4); --shadow-2:0 4px 12px rgba(0,0,0,.5);
+  --shadow-3:0 12px 28px rgba(0,0,0,.6);
+  --shadow-header:0 1px 0 rgba(0,0,0,.3);
+  --skeleton-base:var(--gray-800); --skeleton-shine:var(--gray-700);
+  --on-header:#FFFFFF; --on-header-dim:rgba(255,255,255,.70);
+  --header-control:rgba(255,255,255,.14); --header-control-active:rgba(255,255,255,.24);
+}
+
+/* ============================================================================
+   BRAND tokens set by THEME.  --header-bg is the Top App Bar color.
+   For most themes the header uses the brand color; light neutrals get a
+   slightly deepened header for legibility of white text.
+   ============================================================================ */
+[data-theme="violet"]  { --brand:#7C5CFF; --brand-hover:#5B3DF5; --brand-subtle:#F1EEFF; --accent:#22B8A2; --header-bg:#6D4EF0; }
+[data-theme="indigo"]  { --brand:#4F46E5; --brand-hover:#4338CA; --brand-subtle:#EEF0FF; --accent:#0EA5E9; --header-bg:#4A42D8; }
+[data-theme="emerald"] { --brand:#059669; --brand-hover:#047857; --brand-subtle:#E7F6EF; --accent:#14B8A6; --header-bg:#068A61; }
+[data-theme="slate"]   { --brand:#475569; --brand-hover:#334155; --brand-subtle:#EEF1F5; --accent:#3B82F6; --header-bg:#3A4658; }
+[data-theme="amber"]   { --brand:#D97706; --brand-hover:#B45309; --brand-subtle:#FFF3DC; --accent:#F43F5E; --header-bg:#C26A05; }
+[data-theme="contrast"]{ --brand:#1D4ED8; --brand-hover:#1E3A8A; --brand-subtle:#E6EDFF; --accent:#0F172A; --header-bg:#1E40AF; }
+
+/* brand overrides in dark mode (lighter brand for contrast; header deepened) */
+[data-theme="violet"][data-mode="dark"]  { --brand:#8F6DFF; --brand-hover:#A78CFF; --brand-subtle:#241C4A; --header-bg:#3A2E66; }
+[data-theme="indigo"][data-mode="dark"]  { --brand:#6366F1; --brand-hover:#818CF8; --brand-subtle:#1E1B4B; --header-bg:#2A2870; }
+[data-theme="emerald"][data-mode="dark"] { --brand:#10B981; --brand-hover:#34D399; --brand-subtle:#052E23; --header-bg:#064B38; }
+[data-theme="slate"][data-mode="dark"]   { --brand:#94A3B8; --brand-hover:#CBD5E1; --brand-subtle:#1E293B; --header-bg:#2A3242; }
+[data-theme="amber"][data-mode="dark"]   { --brand:#F59E0B; --brand-hover:#FBBF24; --brand-subtle:#3A2E12; --header-bg:#6B3D08; }
+[data-theme="contrast"][data-mode="dark"]{ --brand:#60A5FA; --brand-hover:#93C5FD; --brand-subtle:#0A1A33; --accent:#E2E8F0; --header-bg:#12327A; }

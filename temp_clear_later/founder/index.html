@@ -68,39 +68,17 @@ const App = {
     }
     const s=Auth.getSession(); const set=this.F.settings();
     const titles={dashboard:this.greeting(),students:'Students',fees:'Fees',reports:'Reports',more:'More'};
-    const branchLabel=this.F.branchName(this.F.activeBranch());
-    const multiBranch=this.F.branches().length>1;
-    // On the dashboard, the school/branch identity IS the dropdown (variant A).
-    const isDash=this.route==='dashboard';
-    const idBlock = isDash
-      ? `<button class="appbar-id appbar-id-btn" onclick="App.openBranchSwitcher()" ${multiBranch?'':'disabled'}>
-           <div class="appbar-title">${set.schoolName}</div>
-           <div class="appbar-sub">${icon('building2')} ${branchLabel}${multiBranch?icon('chevronD'):''}</div>
-         </button>`
-      : `<div class="appbar-id"><div class="appbar-title">${titles[this.route]||set.schoolName}</div>
-           <div class="appbar-sub">${icon('mapPin')} ${branchLabel}</div></div>`;
+    const subtitle={dashboard:set.schoolName,students:'Student information',fees:'Collections & dues',reports:'Show, don\'t tell',more:'Manage your school'}[this.route];
     return `<div class="appbar">
       <div class="appbar-logo">${icon('building')}</div>
-      ${idBlock}
+      <div class="appbar-id">
+        <div class="appbar-title">${titles[this.route]||set.schoolName}</div>
+        <div class="appbar-sub">${icon('mapPin')} ${subtitle||set.schoolName}</div>
+      </div>
       <button class="appbar-btn" onclick="App.notImplemented('Notifications')" aria-label="Alerts">${icon('bell')}<span class="appbar-dot"></span></button>
       <div class="appbar-avatar" style="background:${avatarColor(s.name)}" onclick="App.go('more')">${s.avatar||initials(s.name)}</div>
     </div>`;
   },
-  openBranchSwitcher(){
-    const branches=this.F.branches(); const active=this.F.activeBranch();
-    const opts=[{id:'ALL',name:'All branches',sub:this.F.students().length+' students total'}]
-      .concat(branches.map(b=>({id:b.id,name:b.name,sub:b.code})));
-    const {close}=UI.sheet(`<div class="sheet-title">Switch branch</div>
-      <p class="text-secondary mb-4" style="margin-top:-8px">View one branch, or all branches combined.</p>
-      ${opts.map(o=>`<div class="row" style="border:none;padding:12px 4px" onclick="App.selectBranch('${o.id}')">
-        <div class="avatar avatar-sq" style="background:${o.id===active?'var(--brand)':'var(--brand-subtle)'};color:${o.id===active?'#fff':'var(--brand)'}">${icon('building2')}</div>
-        <div class="row-main"><div class="row-title">${o.name}</div><div class="row-sub">${o.sub}</div></div>
-        ${o.id===active?`<span style="color:var(--brand)">${icon('check')}</span>`:''}
-      </div>`).join('')}
-      <button class="btn btn-secondary btn-full mt-4" onclick="App._branchClose()">Done</button>`);
-    this._branchClose=close;
-  },
-  selectBranch(id){ this.F.setActiveBranch(id); this._branchClose&&this._branchClose(); this.render(); UI.toast('Viewing: '+this.F.branchName(id)); },
   greeting(){ const h=new Date().getHours(); const g=h<12?'Good morning':h<17?'Good afternoon':'Good evening'; return g+', '+Auth.getSession().name.split(' ')[0]; },
 
   go(route,ctx={}){ this.route=route; this.ctx=ctx; this.render(); },
@@ -127,8 +105,7 @@ const App = {
      ======================================================================== */
   Dashboard(el){
     this._backTo='dashboard';
-    this._feePeriod=this._feePeriod||'month';
-    const sk=`<div class="sk" style="height:170px;border-radius:14px;margin-bottom:16px"></div>
+    const sk=`<div class="sk" style="height:150px;border-radius:14px;margin-bottom:16px"></div>
       <div class="grid-2 mb-3">${'<div class="kpi"><div class="sk sk-line" style="width:50%"></div><div class="sk" style="height:24px;width:60%;margin-top:8px"></div></div>'.repeat(2)}</div>
       <div class="card"><div class="sk" style="height:120px"></div></div>`;
     this.withLoading(el,sk,()=>{
@@ -136,64 +113,39 @@ const App = {
       if(fs.count===0){
         return `<div class="state"><div class="state-ill">${icon('sparkle')}</div><div class="state-title">Your school is set up</div><div class="state-msg">Add students and record fees to see your school's live health here.</div></div>`;
       }
-      const ah=this.F.academicHealth();
-      const pipe=this.F.admissionsPipeline();
-      const enrol=this.F.enrolmentTrend(); const maxE=Math.max(1,...enrol.map(e=>e.count));
+      const att=this.F.attendanceToday();
       const trend=this.F.collectionTrend(); const maxT=Math.max(1,...trend.map(t=>t.amount));
-      const recent=this.F.recentPayments(4);
-      const collectedPeriod=this.F.collectedInPeriod(this._feePeriod);
       const pct=Math.round(fs.collected/fs.billed*100);
+      const recent=this.F.recentPayments(4);
       return `
-        <!-- MONEY (period-filtered) — important, but one of several -->
+        <!-- HERO: money collected (the number Rajesh opens the app for) -->
         <div class="card card-raised mb-4" style="background:linear-gradient(135deg,var(--brand),var(--brand-hover));color:var(--text-on-brand);border:none">
-          <div class="flex between items-center">
-            <div style="font-size:var(--t-label);opacity:.9;font-weight:600">Fees collected</div>
-            <div style="font-size:var(--t-caption);opacity:.85">${pct}% of term billed</div>
+          <div style="font-size:var(--t-label);opacity:.85;font-weight:600;margin-bottom:6px">Collected this term</div>
+          <div style="font-family:var(--f-display);font-size:34px;font-weight:700;letter-spacing:-.02em;line-height:1">${fmt.money(fs.collected)}</div>
+          <div style="display:flex;align-items:center;gap:8px;margin-top:14px;font-size:var(--t-caption)">
+            <div style="flex:1;height:8px;background:rgba(255,255,255,.25);border-radius:99px;overflow:hidden"><div style="width:${pct}%;height:100%;background:#fff;border-radius:99px"></div></div>
+            <span style="font-weight:700">${pct}%</span>
           </div>
-          <div style="font-family:var(--f-display);font-size:32px;font-weight:700;letter-spacing:-.02em;line-height:1;margin-top:4px">${fmt.money(collectedPeriod)}</div>
-          <div class="period-seg">
-            ${this.F.PERIODS.map(([k,l])=>`<button class="${this._feePeriod===k?'active':''}" onclick="App.setFeePeriod('${k}')">${l}</button>`).join('')}
-          </div>
-          <div style="font-size:var(--t-caption);opacity:.85;margin-top:10px">${fmt.money(fs.outstanding)} outstanding overall · tap Fees for the breakdown</div>
+          <div style="font-size:var(--t-caption);opacity:.85;margin-top:8px">${fmt.money(fs.outstanding)} outstanding · ${fmt.money(fs.billed)} billed</div>
         </div>
 
-        <!-- BALANCED HEALTH: academics · people · money-health -->
-        <div class="sec-head"><div class="sec-title">School health</div><span class="t-caption">today</span></div>
+        <!-- secondary KPIs -->
         <div class="grid-2 mb-3">
-          ${this.healthKpi('check','Attendance',ah.attendancePct+'%',ah.attendancePct>=90?'var(--viz-positive)':'var(--viz-warning)','present today')}
-          ${this.healthKpi('trend','Pass rate',ah.passRate+'%','var(--viz-positive)','last exams')}
+          ${this.miniKpi('users','Students',this.F.students().length,'var(--info)')}
+          ${this.miniKpi('check','Attendance today',att.pct+'%','var(--viz-positive)')}
         </div>
         <div class="grid-2 mb-4">
-          ${this.healthKpi('users','Students',this.F.students().length,'var(--info)',pipe.admitted+' admitted recently')}
-          ${this.healthKpi('alert','Fee defaulters',(fs.partial+fs.unpaid),'var(--viz-negative)',fmt.moneyShort(fs.outstanding)+' due')}
+          ${this.miniKpi('briefcase','Staff',this.F.staff().length,'var(--brand)')}
+          ${this.miniKpi('alert',(fs.partial+fs.unpaid)+' pending',fmt.moneyShort(fs.outstanding),'var(--viz-negative)',true)}
         </div>
 
-        <!-- ACADEMIC: attendance is health, shown visually -->
-        <div class="card mb-4">
-          <div class="flex between items-center mb-3"><div class="sec-title">Academic snapshot</div><span class="chip chip-success">Healthy</span></div>
-          <div class="flex gap-3">
-            ${this.miniStat('Avg. score',ah.avgScore+'%')}
-            ${this.miniStat('Attendance',ah.attendancePct+'%')}
-            ${this.miniStat('Top students',ah.topPerformers)}
-          </div>
-        </div>
-
-        <!-- PEOPLE: admissions pipeline (growth) -->
-        <div class="card mb-4">
-          <div class="sec-title mb-4">Admissions pipeline</div>
-          ${this.funnelRow('Enquiries',pipe.enquiries,pipe.enquiries)}
-          ${this.funnelRow('Visited',pipe.visited,pipe.enquiries)}
-          ${this.funnelRow('Applied',pipe.applied,pipe.enquiries)}
-          ${this.funnelRow('Admitted',pipe.admitted,pipe.enquiries,true)}
-        </div>
-
-        <!-- collection trend (money over time) -->
+        <!-- collection trend (SHOW) -->
         <div class="card card-raised mb-4">
           <div class="flex between items-center mb-4"><div class="sec-title">Collection trend</div><span class="t-caption">Last 6 months</span></div>
           <div class="chart-bars">${trend.map(t=>`<div class="bar-col"><div class="bar-val">${t.amount?fmt.moneyShort(t.amount).replace('₹',''):''}</div><div class="bar pos" style="height:${(t.amount/maxT)*100}%"></div><div class="bar-label">${t.label}</div></div>`).join('')}</div>
         </div>
 
-        <!-- fee status donut -->
+        <!-- fee status donut (SHOW) -->
         ${this.feeStatusCard(fs)}
 
         <!-- activity feed -->
@@ -203,17 +155,6 @@ const App = {
         <div class="dashed-card">${icon('sparkle')} <span class="t-label" style="color:var(--text-tertiary)">AI insights arrive with Enterprise</span></div>
       `;
     });
-  },
-  setFeePeriod(p){ this._feePeriod=p; this.Dashboard(document.getElementById('screen')); },
-  setFeePeriodFees(p){ this._feePeriod=p; this.Fees(document.getElementById('screen')); },
-  healthKpi(ic,label,value,color,sub){
-    return `<div class="kpi"><div class="flex items-center gap-2 mb-1"><span style="color:${color};display:grid">${icon(ic)}</span><span class="kpi-label" style="margin:0">${label}</span></div>
-      <div class="kpi-value" style="font-size:22px">${value}</div>${sub?`<div class="kpi-sub">${sub}</div>`:''}</div>`;
-  },
-  miniStat(label,value){ return `<div class="flex-1 text-center" style="padding:12px 6px;background:var(--surface-sunken);border-radius:var(--r-md)"><div class="t-data" style="font-weight:700;font-size:18px">${value}</div><div class="t-caption">${label}</div></div>`; },
-  funnelRow(label,val,max,highlight){
-    return `<div class="mb-2"><div class="flex between mb-1"><span class="t-label">${label}</span><span class="t-data" style="font-weight:700${highlight?';color:var(--viz-positive)':''}">${val}</span></div>
-      <div style="height:8px;background:var(--surface-sunken);border-radius:99px;overflow:hidden"><div style="width:${(val/max)*100}%;height:100%;background:${highlight?'var(--viz-positive)':'var(--brand)'};border-radius:99px"></div></div></div>`;
   },
   miniKpi(ic,label,value,color,danger){
     return `<div class="kpi"><div class="flex items-center gap-2 mb-1"><span style="color:${color};display:grid">${icon(ic)}</span><span class="kpi-label" style="margin:0">${label}</span></div>
@@ -354,14 +295,11 @@ const App = {
       const byType=this.F.collectionByType(); const maxType=Math.max(...byType.map(t=>t.amount));
       const byMode=this.F.collectionByMode(); const totalMode=Object.values(byMode).reduce((a,b)=>a+b,0);
       const defaulters=this.F.defaulters().slice(0,5);
-      this._feePeriod=this._feePeriod||'month';
-      const collectedPeriod=this.F.collectedInPeriod(this._feePeriod);
       return `
         <div class="card card-raised mb-4" style="background:linear-gradient(135deg,var(--brand),var(--brand-hover));color:var(--text-on-brand);border:none">
-          <div style="font-size:var(--t-label);opacity:.9;font-weight:600">Fees collected</div>
-          <div style="font-family:var(--f-display);font-size:30px;font-weight:700;letter-spacing:-.02em;margin-top:4px">${fmt.money(collectedPeriod)}</div>
-          <div class="period-seg">${this.F.PERIODS.map(([k,l])=>`<button class="${this._feePeriod===k?'active':''}" onclick="App.setFeePeriodFees('${k}')">${l}</button>`).join('')}</div>
-          <div style="font-size:var(--t-caption);opacity:.85;margin-top:10px">${fmt.money(fs.outstanding)} still outstanding overall</div>
+          <div style="font-size:var(--t-label);opacity:.85;font-weight:600;margin-bottom:6px">Total collected this term</div>
+          <div style="font-family:var(--f-display);font-size:32px;font-weight:700;letter-spacing:-.02em">${fmt.money(fs.collected)}</div>
+          <div style="font-size:var(--t-caption);opacity:.85;margin-top:8px">${fmt.money(fs.outstanding)} still outstanding</div>
         </div>
 
         <!-- BY ITEM TYPE: the flexible-ledger value proof -->

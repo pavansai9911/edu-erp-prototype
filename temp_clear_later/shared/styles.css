@@ -59,9 +59,6 @@ svg{width:20px;height:20px;flex-shrink:0;}
 .appbar-logo svg{width:20px;height:20px;color:var(--on-header);}
 .appbar-logo img{width:100%;height:100%;object-fit:cover;}
 .appbar-id{flex:1;min-width:0;}
-.appbar-id-btn{background:none;border:none;text-align:left;color:inherit;display:block;width:100%;padding:0;cursor:pointer;}
-.appbar-id-btn:disabled{cursor:default;}
-.appbar-id-btn .appbar-sub svg:last-child{margin-left:-1px;opacity:.9;}
 .appbar-title{font-family:var(--f-display);font-size:var(--t-h3);font-weight:700;line-height:1.2;
   white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
 .appbar-sub{font-size:var(--t-caption);color:var(--on-header-dim);display:flex;align-items:center;gap:5px;line-height:1.3;margin-top:1px;}
@@ -360,10 +357,3 @@ svg{width:20px;height:20px;flex-shrink:0;}
 .hidden{display:none!important;}
 .divider{height:1px;background:var(--border-subtle);margin:var(--sp-4) 0;}
 .dashed-card{border:1px dashed var(--border-strong);border-radius:var(--r-md);padding:var(--sp-4);text-align:center;color:var(--text-tertiary);}
-
-/* period filter (fee hero: today/week/month/term/year) — on a brand surface */
-.period-seg{display:flex;gap:4px;background:rgba(255,255,255,.15);border-radius:var(--r-sm);padding:3px;margin-top:var(--sp-3);overflow-x:auto;scrollbar-width:none;}
-.period-seg::-webkit-scrollbar{display:none;}
-.period-seg button{flex:1;min-width:56px;border:none;background:transparent;color:rgba(255,255,255,.8);
-  font-size:var(--t-caption);font-weight:700;padding:6px 8px;border-radius:var(--r-xs);white-space:nowrap;transition:all var(--m-fast);}
-.period-seg button.active{background:#fff;color:var(--brand);}
