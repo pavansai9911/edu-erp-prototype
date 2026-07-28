@@ -1,0 +1,617 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="violet" data-mode="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<title>EduERP · ERP Admin</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Sora:wght@600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../shared/tokens.css">
+<link rel="stylesheet" href="../shared/styles.css">
+</head>
+<body>
+<div class="viewport">
+  <div class="proto-banner" onclick="App.resetPrompt()">◆ ERP ADMIN PROTOTYPE · tap to reset demo data</div>
+  <div id="app"></div>
+</div>
+
+<script src="../shared/data.js"></script>
+<script src="../shared/auth.js"></script>
+<script src="../shared/utils.js"></script>
+<script>
+/* ============================================================================
+   ERP ADMIN — Single Page Application
+   Screens: Login · Dashboard · Organizations (list/detail) · Onboard wizard ·
+   Reports · Profile.  Every screen has real logic and real states.
+   ============================================================================ */
+const App = {
+  route:'dashboard',
+  ctx:{},
+  systemDark:window.matchMedia('(prefers-color-scheme:dark)').matches,
+  // simulate a network fetch so Loading states are real (prototype realism)
+  loadingMs:600,
+
+  init(){
+    const s=DB.getSettings();
+    this.applyTheme(s.theme||'violet', s.mode||'system');
+    window.matchMedia('(prefers-color-scheme:dark)').addEventListener('change',e=>{this.systemDark=e.matches;const st=DB.getSettings();if((st.mode||'system')==='system')this.applyTheme(st.theme,'system');});
+    if(Auth.isAdmin()) this.render(); else this.renderLogin();
+  },
+
+  applyTheme(theme,mode){
+    document.documentElement.dataset.theme=theme;
+    const m = mode==='system' ? (this.systemDark?'dark':'light') : mode;
+    document.documentElement.dataset.mode=m;
+  },
+
+  /* ========================================================================
+     LOGIN
+     ======================================================================== */
+  renderLogin(){
+    document.getElementById('app').innerHTML=`
+    <div class="login fade-in">
+      <div class="login-brand">${icon('logo')}</div>
+      <span class="login-badge">${icon('shield')} Platform Console</span>
+      <h1 class="t-display mb-2">ERP Admin</h1>
+      <p class="text-secondary mb-6">Sign in to onboard schools and manage the platform.</p>
+      <div class="field">
+        <label class="field-label">Email</label>
+        <input class="input" id="email" type="email" value="admin@nextgeneduerp.com" autocomplete="username">
+      </div>
+      <div class="field">
+        <label class="field-label">Password</label>
+        <div class="input-affix">
+          <input class="input" id="pass" type="password" value="demo1234" autocomplete="current-password">
+          <button class="input-group-btn" onclick="App.togglePass(this)" aria-label="Show password">${icon('user')}</button>
+        </div>
+        <div class="field-hint">Platform admins sign in without an organization code.</div>
+      </div>
+      <div id="loginErr"></div>
+      <button class="btn btn-primary btn-full btn-lg mt-2" id="loginBtn" onclick="App.doLogin()">Sign in</button>
+      <p class="t-caption text-center mt-6">Prototype · seeded admin credentials pre-filled</p>
+    </div>`;
+  },
+  togglePass(btn){ const i=btn.previousElementSibling; i.type=i.type==='password'?'text':'password'; },
+  doLogin(){
+    const email=document.getElementById('email').value;
+    const pass=document.getElementById('pass').value;
+    const btn=document.getElementById('loginBtn');
+    btn.textContent='Signing in…'; btn.disabled=true;
+    setTimeout(()=>{
+      const r=Auth.login(email,pass,'admin');
+      if(r.success){ this.route='dashboard'; this.render(); UI.toast('Welcome back, '+r.user.name.split(' ')[0]); }
+      else{ document.getElementById('loginErr').innerHTML=`<div class="field-error mb-2">${icon('alert')} ${r.message}</div>`; btn.textContent='Sign in'; btn.disabled=false; }
+    },500);
+  },
+  logout(){ Auth.logout(); this.renderLogin(); },
+
+  /* ========================================================================
+     SHELL (brand header + content + bottom tabs)
+     ======================================================================== */
+  render(){
+    document.getElementById('app').innerHTML=this.Shell();
+    this.mountScreen();
+  },
+  Shell(){
+    const tabs=[
+      {k:'dashboard',ic:'home',label:'Home'},
+      {k:'organizations',ic:'building',label:'Schools'},
+      {k:'reports',ic:'chart',label:'Reports'},
+      {k:'settings',ic:'settings',label:'Settings'},
+    ];
+    const s=Auth.getSession();
+    const isWizard = this.route==='onboard';
+    return `
+      ${this.AppBar()}
+      <div class="content fade-in" id="screen"></div>
+      ${['dashboard','organizations'].includes(this.route)?`<button class="fab" onclick="App.go('onboard')" aria-label="Onboard school">${icon('plus')}</button>`:''}
+      ${isWizard?'':`<div class="tabbar">
+        ${tabs.map(t=>`<button class="tab ${this.route===t.k?'active':''}" onclick="App.go('${t.k}')">${icon(t.ic)}<span>${t.label}</span></button>`).join('')}
+      </div>`}`;
+  },
+  AppBar(){
+    // sub-pages (detail, onboard) show a back button + contextual title
+    const sub={organization:'Organization',onboard:'Onboard school'};
+    if(this.ctx.sub){
+      return `<div class="appbar sub">
+        <button class="appbar-btn" onclick="App.back()" aria-label="Back">${icon('chevronL')}</button>
+        <div class="appbar-id"><div class="appbar-title">${this.ctx.title||''}</div>${this.ctx.subtitle?`<div class="appbar-sub">${this.ctx.subtitle}</div>`:''}</div>
+      </div>`;
+    }
+    const s=Auth.getSession();
+    const titles={dashboard:'ERP Admin',organizations:'Organizations',reports:'Reports',settings:'Settings'};
+    return `<div class="appbar">
+      <div class="appbar-logo">${icon('logo')}</div>
+      <div class="appbar-id">
+        <div class="appbar-title">${titles[this.route]||'ERP Admin'}</div>
+        <div class="appbar-sub">${icon('shield')} Platform Console</div>
+      </div>
+      <button class="appbar-btn" onclick="App.notImplemented('Notifications')" aria-label="Alerts">${icon('bell')}<span class="appbar-dot"></span></button>
+      <div class="appbar-avatar" style="background:${avatarColor(s.name)}" onclick="App.go('settings')">${s.avatar||initials(s.name)}</div>
+    </div>`;
+  },
+
+  /* navigation */
+  go(route,ctx={}){ this.route=route; this.ctx=ctx; this.render(); },
+  back(){ this.ctx={}; this.route=this._backTo||'dashboard'; this.render(); },
+  mountScreen(){
+    const el=document.getElementById('screen');
+    switch(this.route){
+      case 'dashboard': return this.Dashboard(el);
+      case 'organizations': return this.Organizations(el);
+      case 'organization': return this.OrgDetail(el);
+      case 'onboard': return this.Onboard(el);
+      case 'reports': return this.Reports(el);
+      case 'settings': return this.Settings(el);
+    }
+  },
+
+  /* fake async load to exercise real Loading states */
+  withLoading(el,skeleton,build){
+    el.innerHTML=skeleton;
+    setTimeout(()=>{ el.innerHTML=build(); },this.loadingMs);
+  },
+
+  /* ========================================================================
+     DASHBOARD  (Loading → Empty | Content)
+     ======================================================================== */
+  Dashboard(el){
+    const sk=`
+      <div class="grid-2 mb-3">${'<div class="kpi"><div class="sk sk-line" style="width:50%"></div><div class="sk" style="height:26px;width:40%;margin:8px 0"></div></div>'.repeat(4)}</div>
+      <div class="card"><div class="sk" style="height:128px"></div></div>`;
+    this.withLoading(el,sk,()=>{
+      const c=DB.planCounts();
+      if(c.total===0){
+        return `<div class="state">
+          <div class="state-ill">${icon('building2')}</div>
+          <div class="state-title">No schools yet</div>
+          <div class="state-msg">Onboard your first school to bring the platform to life. Metrics, trends, and reports appear here as schools join.</div>
+          <button class="btn btn-primary btn-lg mt-2" onclick="App.go('onboard')">${icon('plus')} Onboard a school</button>
+        </div>`;
+      }
+      const trend=DB.onboardingTrend(); const max=Math.max(1,...trend.map(t=>t.count));
+      return `
+        <div class="grid-2 mb-3">
+          ${this.kpiCard('building','Total schools',c.total,'brand',c.active+' active')}
+          ${this.kpiCard('users','Students',fmt.num(c.students),'info','across all schools')}
+        </div>
+        <div class="grid-2 mb-4">
+          ${this.kpiCard('shield','Basic plan',c.basic,'neutral','')}
+          ${this.kpiCard('sparkle','Pro + Ent.',c.proPlus,'success','')}
+        </div>
+
+        <div class="card card-raised mb-4">
+          <div class="flex between items-center mb-4"><div class="sec-title">Onboarding trend</div><span class="t-caption">Last 6 months</span></div>
+          <div class="chart-bars">
+            ${trend.map(t=>`<div class="bar-col"><div class="bar-val">${t.count||''}</div><div class="bar" style="height:${(t.count/max)*100}%"></div><div class="bar-label">${t.label}</div></div>`).join('')}
+          </div>
+        </div>
+
+        <div class="sec-head"><div class="sec-title">Recent schools</div><button class="sec-link" onclick="App.go('organizations')">View all</button></div>
+        <div class="card card-pad-0"><div class="list">
+          ${DB.orgs().slice(-3).reverse().map(o=>this.orgRow(o)).join('')}
+        </div></div>
+
+        <div class="dashed-card mt-4">${icon('sparkle')} <span class="t-label" style="color:var(--text-tertiary)">AI insights arrive with Enterprise</span></div>
+      `;
+    });
+  },
+  kpiCard(ic,label,value,tone,sub){
+    const toneMap={brand:'var(--brand-subtle);color:var(--brand)',info:'var(--info-subtle);color:var(--info)',success:'var(--success-subtle);color:var(--success)',neutral:'var(--surface-sunken);color:var(--text-secondary)'};
+    return `<div class="kpi">
+      <div class="kpi-icon" style="background:${toneMap[tone]}">${icon(ic)}</div>
+      <div class="kpi-label">${label}</div>
+      <div class="kpi-value">${value}</div>
+      ${sub?`<div class="kpi-sub">${sub}</div>`:''}
+    </div>`;
+  },
+  orgRow(o){
+    const chipCls=o.plan==='Enterprise'?'chip-info':o.plan==='Pro'?'chip-success':'chip-neutral';
+    const statusChip=o.status==='active'?'':'<span class="chip chip-danger" style="margin-top:2px">Inactive</span>';
+    return `<div class="row" onclick="App.openOrg('${o.id}')">
+      <div class="avatar avatar-sq" style="background:${avatarColor(o.name)}">${initials(o.name)}</div>
+      <div class="row-main">
+        <div class="row-title">${o.name}</div>
+        <div class="row-sub">${o.city} · <span class="t-code">${o.code}</span></div>
+      </div>
+      <div class="row-trail"><span class="chip ${chipCls}">${o.plan}</span>${statusChip}</div>
+      <span class="row-chev">${icon('chevronR')}</span>
+    </div>`;
+  },
+
+  /* ========================================================================
+     ORGANIZATIONS  (Loading → Empty | Content, search + filter)
+     ======================================================================== */
+  Organizations(el){
+    this._backTo='dashboard';
+    const sk=`<div class="sk" style="height:48px;margin-bottom:16px"></div>${'<div class="sk-row"><div class="sk sk-circle"></div><div style="flex:1"><div class="sk sk-line" style="width:60%"></div><div class="sk sk-line" style="width:40%"></div></div></div>'.repeat(5)}`;
+    this.withLoading(el,sk,()=>this.orgsMarkup());
+    this._orgFilter=this._orgFilter||'all';
+    this._orgSearch=this._orgSearch||'';
+  },
+  orgsMarkup(){
+    const all=DB.orgs();
+    if(all.length===0){
+      return `<div class="state">
+        <div class="state-ill">${icon('building2')}</div>
+        <div class="state-title">No schools onboarded</div>
+        <div class="state-msg">Tap the + button to onboard your first school. It becomes active immediately and its founder can log in.</div>
+        <button class="btn btn-primary btn-lg mt-2" onclick="App.go('onboard')">${icon('plus')} Onboard a school</button>
+      </div>`;
+    }
+    const f=this._orgFilter||'all'; const q=(this._orgSearch||'').toLowerCase();
+    let list=all.filter(o=>{
+      const mf = f==='all'||(f==='active'&&o.status==='active')||(f==='inactive'&&o.status==='inactive')||(o.plan.toLowerCase()===f);
+      const mq = !q||o.name.toLowerCase().includes(q)||o.city.toLowerCase().includes(q)||o.code.toLowerCase().includes(q);
+      return mf&&mq;
+    });
+    const filters=[['all','All'],['active','Active'],['basic','Basic'],['pro','Pro'],['enterprise','Enterprise'],['inactive','Inactive']];
+    return `
+      <div class="input-affix mb-3">
+        <span style="position:absolute;left:14px;color:var(--text-tertiary);display:grid">${icon('search')}</span>
+        <input class="input" style="padding-left:42px" placeholder="Search schools, city, code…" value="${this._orgSearch||''}" oninput="App.searchOrgs(this.value)">
+      </div>
+      <div class="filter-row">
+        ${filters.map(([k,l])=>`<button class="filter-chip ${f===k?'active':''}" onclick="App.filterOrgs('${k}')">${l}</button>`).join('')}
+      </div>
+      ${list.length===0
+        ? `<div class="state" style="min-height:40vh"><div class="state-ill">${icon('search')}</div><div class="state-title">No matches</div><div class="state-msg">No schools match your search or filter. Try clearing them.</div><button class="btn btn-secondary mt-2" onclick="App.clearOrgFilters()">Clear filters</button></div>`
+        : `<div class="card card-pad-0"><div class="list">${list.map(o=>this.orgRow(o)).join('')}</div></div><p class="t-caption text-center mt-3">${list.length} of ${all.length} schools</p>`}
+    `;
+  },
+  searchOrgs(v){ this._orgSearch=v; const el=document.getElementById('screen'); const scroll=el.scrollTop; el.innerHTML=this.orgsMarkup(); el.scrollTop=scroll; const inp=el.querySelector('input'); if(inp){inp.focus();inp.setSelectionRange(v.length,v.length);} },
+  filterOrgs(k){ this._orgFilter=k; document.getElementById('screen').innerHTML=this.orgsMarkup(); },
+  clearOrgFilters(){ this._orgFilter='all'; this._orgSearch=''; document.getElementById('screen').innerHTML=this.orgsMarkup(); },
+
+  /* ========================================================================
+     ORG DETAIL  (Overview + Subscription, plan change)
+     ======================================================================== */
+  openOrg(id){ this.go('organization',{sub:true,id,title:'',tab:'overview'}); this._backFrom=this.route; },
+  OrgDetail(el){
+    const o=DB.getById(DB.COLS.ORGS,this.ctx.id);
+    if(!o){ el.innerHTML=`<div class="state"><div class="state-ill err">${icon('alert')}</div><div class="state-title">Not found</div><div class="state-msg">This school no longer exists.</div><button class="btn btn-secondary mt-2" onclick="App.go('organizations')">Back to schools</button></div>`; return; }
+    // set header title dynamically
+    this.ctx.title=o.name; this.ctx.subtitle=`<span class="t-code">${o.code}</span> · ${o.city}`;
+    document.querySelector('.appbar')?.remove();
+    document.getElementById('app').insertAdjacentHTML('afterbegin',this.AppBar());
+    const tab=this.ctx.tab||'overview';
+    const chipCls=o.plan==='Enterprise'?'chip-info':o.plan==='Pro'?'chip-success':'chip-neutral';
+    el.innerHTML=`
+      <div class="card card-raised mb-4">
+        <div class="flex gap-3 items-center">
+          <div class="avatar avatar-sq" style="width:56px;height:56px;font-size:16px;background:${avatarColor(o.name)}">${initials(o.name)}</div>
+          <div class="flex-1">
+            <div class="t-h2" style="line-height:1.2">${o.name}</div>
+            <div class="row-sub mt-1">${icon('mapPin')} ${o.city}</div>
+          </div>
+        </div>
+        <div class="flex gap-2 mt-4">
+          <span class="chip ${chipCls}">${o.plan}</span>
+          <span class="chip ${o.status==='active'?'chip-success':'chip-danger'}"><span class="chip-dot"></span>${o.status==='active'?'Active':'Inactive'}</span>
+        </div>
+      </div>
+      <div class="tabs mb-4">
+        <button class="${tab==='overview'?'active':''}" onclick="App.orgTab('overview')">Overview</button>
+        <button class="${tab==='subscription'?'active':''}" onclick="App.orgTab('subscription')">Subscription</button>
+      </div>
+      <div id="orgTab"></div>`;
+    this.renderOrgTab(o,tab);
+  },
+  orgTab(t){ this.ctx.tab=t; const o=DB.getById(DB.COLS.ORGS,this.ctx.id);
+    document.querySelectorAll('.tabs button').forEach((b,i)=>b.classList.toggle('active',(i===0&&t==='overview')||(i===1&&t==='subscription')));
+    this.renderOrgTab(o,t);
+  },
+  renderOrgTab(o,t){
+    const box=document.getElementById('orgTab');
+    if(t==='overview'){
+      box.innerHTML=`
+        <div class="card mb-4"><div class="dl">
+          <div class="dl-row"><span class="dl-key">Organization code</span><span class="dl-val t-code">${o.code}</span></div>
+          <div class="dl-row"><span class="dl-key">City</span><span class="dl-val">${o.city}</span></div>
+          <div class="dl-row"><span class="dl-key">Branch</span><span class="dl-val">${o.branch||'—'}</span></div>
+          <div class="dl-row"><span class="dl-key">Academic year</span><span class="dl-val">${o.academicYear||'—'}</span></div>
+          <div class="dl-row"><span class="dl-key">Students</span><span class="dl-val t-data">${fmt.num(o.students)}</span></div>
+          <div class="dl-row"><span class="dl-key">Onboarded</span><span class="dl-val">${fmt.date(o.onboardedAt)}</span></div>
+        </div></div>
+        <button class="btn ${o.status==='active'?'btn-danger-soft':'btn-primary'} btn-full" onclick="App.toggleOrgStatus('${o.id}')">
+          ${icon(o.status==='active'?'ban':'power')} ${o.status==='active'?'Deactivate school':'Reactivate school'}
+        </button>`;
+    } else {
+      const founder=DB.getBy(DB.COLS.FOUNDERS,'orgId',o.id)[0];
+      const changes=DB.getBy(DB.COLS.PLANS,'orgId',o.id).reverse();
+      box.innerHTML=`
+        <div class="card mb-4">
+          <div class="flex between items-center mb-3"><div class="t-h3">Current plan</div><span class="chip ${o.plan==='Enterprise'?'chip-info':o.plan==='Pro'?'chip-success':'chip-neutral'}">${o.plan}</span></div>
+          <p class="t-caption mb-4">${this.planBlurb(o.plan)}</p>
+          <button class="btn btn-primary btn-full" onclick="App.openPlanSheet('${o.id}')">${icon('trend')} Change plan</button>
+        </div>
+        ${founder?`<div class="sec-head"><div class="sec-title">Founder login</div></div>
+        <div class="card card-pad-0 mb-4"><div class="row" style="border:none">
+          <div class="avatar" style="background:${avatarColor(founder.name)}">${initials(founder.name)}</div>
+          <div class="row-main"><div class="row-title">${founder.name}</div><div class="row-sub">${founder.email}</div></div>
+          <span class="chip chip-success"><span class="chip-dot"></span>Active</span>
+        </div></div>`:''}
+        ${changes.length?`<div class="sec-head"><div class="sec-title">Plan history</div></div>
+        <div class="card card-pad-0"><div class="list">${changes.map(c=>`<div class="row" style="cursor:default">
+          <div class="avatar avatar-sq" style="background:var(--surface-sunken);color:var(--text-secondary)">${icon('trend')}</div>
+          <div class="row-main"><div class="row-title">${c.from} → ${c.to}</div><div class="row-sub">${c.reason||'No note'} · ${fmt.ago(c.createdAt)}</div></div>
+        </div>`).join('')}</div></div>`:''}
+      `;
+    }
+  },
+  planBlurb(p){ return p==='Basic'?'3 apps: ERP Admin, Founder, Staff. Core operations.':p==='Pro'?'Everything in Basic + the Parent app.':'Everything in Pro + true white-label branding.'; },
+  toggleOrgStatus(id){
+    const o=DB.getById(DB.COLS.ORGS,id);
+    UI.confirm({title:o.status==='active'?'Deactivate school?':'Reactivate school?',message:o.status==='active'?`${o.name} will lose access until reactivated.`:`${o.name} will regain access immediately.`,confirmText:o.status==='active'?'Deactivate':'Reactivate',danger:o.status==='active'}).then(ok=>{
+      if(!ok)return; DB.update(DB.COLS.ORGS,id,{status:o.status==='active'?'inactive':'active'});
+      UI.toast('School '+(o.status==='active'?'deactivated':'reactivated')); this.OrgDetail(document.getElementById('screen'));
+    });
+  },
+  openPlanSheet(id){
+    const o=DB.getById(DB.COLS.ORGS,id);
+    const plans=[['Basic','3 apps · core operations'],['Pro','+ Parent app'],['Enterprise','+ true white-label']];
+    const {close}=UI.sheet(`
+      <div class="sheet-title">Change plan</div>
+      <p class="text-secondary mb-4" style="margin-top:-8px">Changing the plan unlocks tier features for <b>${o.name}</b>.</p>
+      ${plans.map(([p,d])=>`<button class="card card-interactive mb-3 flex between items-center" style="width:100%;text-align:left;border-color:${o.plan===p?'var(--brand)':'var(--border-subtle)'}" onclick="App.applyPlan('${id}','${p}')">
+        <div><div class="row-title">${p}</div><div class="row-sub">${d}</div></div>
+        ${o.plan===p?`<span class="chip chip-brand">Current</span>`:`<span class="row-chev">${icon('chevronR')}</span>`}
+      </button>`).join('')}
+    `);
+    this._planSheetClose=close;
+  },
+  applyPlan(id,plan){
+    const o=DB.getById(DB.COLS.ORGS,id);
+    if(o.plan===plan){ this._planSheetClose&&this._planSheetClose(); return; }
+    this._planSheetClose&&this._planSheetClose();
+    DB.changePlan(id,plan,'Changed via console');
+    UI.toast(`Plan changed to ${plan}`);
+    this.OrgDetail(document.getElementById('screen'));
+  },
+
+  /* ========================================================================
+     ONBOARD WIZARD  (4 steps, real validation, atomic create)
+     ======================================================================== */
+  Onboard(el){
+    this._backTo='dashboard';
+    this.ctx.sub=true; this.ctx.title='Onboard school';
+    this.wiz={step:1,data:{plan:'Basic'}};
+    document.querySelector('.appbar')?.remove();
+    document.getElementById('app').insertAdjacentHTML('afterbegin',this.AppBar());
+    this.renderWizard();
+  },
+  renderWizard(){
+    const el=document.getElementById('screen'); const s=this.wiz.step;
+    const steps=['School','Founder','Setup','Review'];
+    const stepper=`<div class="stepper">${steps.map((_,i)=>{
+      const n=i+1; const st=n<s?'done':n===s?'active':'';
+      return `<div class="step-dot"><div class="step-num ${st}">${n<s?icon('check'):n}</div>${i<3?`<div class="step-line ${n<s?'done':''}"></div>`:''}</div>`;
+    }).join('')}</div><div class="step-label">Step ${s} of 4 · ${steps[s-1]}</div>`;
+
+    let body='';
+    if(s===1){
+      const d=this.wiz.data;
+      body=`
+        <div class="field"><label class="field-label">School name <span class="req">*</span></label><input class="input" id="w-name" value="${d.schoolName||''}" placeholder="Sunrise Public School"></div>
+        <div class="field"><label class="field-label">Organization code <span class="req">*</span></label><input class="input t-code" id="w-code" value="${d.orgCode||''}" placeholder="SPS-CHN" style="text-transform:uppercase"><div class="field-hint">A short unique code. Founders use it to log in.</div></div>
+        <div class="field"><label class="field-label">City <span class="req">*</span></label><input class="input" id="w-city" value="${d.city||''}" placeholder="Chennai"></div>
+        <div class="field"><label class="field-label">Address</label><textarea class="textarea" id="w-addr" placeholder="Optional">${d.address||''}</textarea></div>
+      `;
+    } else if(s===2){
+      const d=this.wiz.data;
+      body=`
+        <p class="text-secondary mb-4">This creates the school owner's login. They can sign in to the Founder app immediately after onboarding.</p>
+        <div class="field"><label class="field-label">Founder name <span class="req">*</span></label><input class="input" id="w-fname" value="${d.founderName||''}" placeholder="Rajesh Kumar"></div>
+        <div class="field"><label class="field-label">Founder email <span class="req">*</span></label><input class="input" id="w-femail" type="email" value="${d.founderEmail||''}" placeholder="rajesh@sunrise.edu"></div>
+        <div class="field"><label class="field-label">Temporary password <span class="req">*</span></label><input class="input" id="w-fpass" value="${d.founderPassword||''}" placeholder="Min 6 characters"><div class="field-hint">The founder can change this after first login.</div></div>
+      `;
+    } else if(s===3){
+      const d=this.wiz.data;
+      body=`
+        <div class="field"><label class="field-label">First branch name <span class="req">*</span></label><input class="input" id="w-branch" value="${d.branchName||'Main Campus'}" placeholder="Main Campus"></div>
+        <div class="field"><label class="field-label">Academic year <span class="req">*</span></label><input class="input" id="w-year" value="${d.academicYear||'2026-27'}" placeholder="2026-27"></div>
+        <div class="field"><label class="field-label">Subscription plan</label>
+          <div class="segmented" id="w-plan">
+            ${['Basic','Pro','Enterprise'].map(p=>`<button class="${(d.plan||'Basic')===p?'active':''}" onclick="App.wizPlan('${p}')">${p}</button>`).join('')}
+          </div>
+          <div class="field-hint">${this.planBlurb(d.plan||'Basic')}</div>
+        </div>
+      `;
+    } else {
+      const d=this.wiz.data;
+      body=`
+        <p class="text-secondary mb-4">Review before creating. Onboarding creates the school and the founder login together.</p>
+        <div class="card mb-4"><div class="dl">
+          <div class="dl-row"><span class="dl-key">School</span><span class="dl-val">${d.schoolName}</span></div>
+          <div class="dl-row"><span class="dl-key">Code</span><span class="dl-val t-code">${d.orgCode}</span></div>
+          <div class="dl-row"><span class="dl-key">City</span><span class="dl-val">${d.city}</span></div>
+          <div class="dl-row"><span class="dl-key">Founder</span><span class="dl-val">${d.founderName}</span></div>
+          <div class="dl-row"><span class="dl-key">Founder email</span><span class="dl-val">${d.founderEmail}</span></div>
+          <div class="dl-row"><span class="dl-key">Branch</span><span class="dl-val">${d.branchName}</span></div>
+          <div class="dl-row"><span class="dl-key">Academic year</span><span class="dl-val">${d.academicYear}</span></div>
+          <div class="dl-row"><span class="dl-key">Plan</span><span class="dl-val">${d.plan}</span></div>
+        </div></div>
+      `;
+    }
+    const footer=`<div class="wiz-footer">
+      ${s>1?`<button class="btn btn-secondary btn-full" onclick="App.wizBack()">Back</button>`:''}
+      <button class="btn btn-primary btn-full" onclick="App.wizNext()">${s<4?'Continue':'Create school'}</button>
+    </div>`;
+    el.innerHTML=`<div class="wiz-flow"><div class="wiz-body">${stepper}<div class="fade-in">${body}</div></div>${footer}</div>`;
+  },
+  wizPlan(p){ this.wiz.data.plan=p; document.querySelectorAll('#w-plan button').forEach(b=>b.classList.toggle('active',b.textContent===p)); document.querySelector('#w-plan').nextElementSibling.textContent=this.planBlurb(p); },
+  _saveStep(){
+    const s=this.wiz.step, d=this.wiz.data, g=id=>document.getElementById(id)?.value.trim();
+    if(s===1){ d.schoolName=g('w-name'); d.orgCode=(g('w-code')||'').toUpperCase(); d.city=g('w-city'); d.address=g('w-addr'); }
+    if(s===2){ d.founderName=g('w-fname'); d.founderEmail=g('w-femail'); d.founderPassword=g('w-fpass'); }
+    if(s===3){ d.branchName=g('w-branch'); d.academicYear=g('w-year'); }
+  },
+  _validateStep(){
+    const s=this.wiz.step, d=this.wiz.data, errs=[];
+    if(s===1){ if(!d.schoolName)errs.push('w-name'); if(!d.orgCode)errs.push('w-code'); if(!d.city)errs.push('w-city');
+      if(d.orgCode && DB.orgs().some(o=>o.code===d.orgCode)){ this._wizErr='That organization code is already in use.'; errs.push('w-code'); } }
+    if(s===2){ if(!d.founderName)errs.push('w-fname');
+      if(!d.founderEmail||!/^\S+@\S+\.\S+$/.test(d.founderEmail)){ errs.push('w-femail'); if(d.founderEmail)this._wizErr='Enter a valid email address.'; }
+      if(d.founderEmail && DB.getAll(DB.COLS.FOUNDERS).some(f=>f.email.toLowerCase()===d.founderEmail.toLowerCase())){ this._wizErr='A founder with that email already exists.'; errs.push('w-femail'); }
+      if(!d.founderPassword||d.founderPassword.length<6){ errs.push('w-fpass'); if(d.founderPassword)this._wizErr='Password must be at least 6 characters.'; } }
+    if(s===3){ if(!d.branchName)errs.push('w-branch'); if(!d.academicYear)errs.push('w-year'); }
+    return errs;
+  },
+  wizNext(){
+    this._saveStep(); this._wizErr='';
+    const errs=this._validateStep();
+    if(errs.length){
+      errs.forEach(id=>document.getElementById(id)?.classList.add('error'));
+      UI.toast(this._wizErr||'Please complete the required fields','error'); this._wizErr='';
+      return;
+    }
+    if(this.wiz.step<4){ this.wiz.step++; this.renderWizard(); }
+    else this.wizSubmit();
+  },
+  wizBack(){ this._saveStep(); if(this.wiz.step>1){ this.wiz.step--; this.renderWizard(); } },
+  wizSubmit(){
+    const btn=document.querySelector('#screen .btn-primary:last-child');
+    if(btn){ btn.textContent='Creating…'; btn.disabled=true; }
+    setTimeout(()=>{
+      const {org,founder}=DB.onboardSchool(this.wiz.data);
+      // success screen
+      document.getElementById('screen').innerHTML=`<div class="state fade-in">
+        <div class="state-ill pos">${icon('checkCircle')}</div>
+        <div class="state-title">${org.name} is live</div>
+        <div class="state-msg">The school is active and <b>${founder.name}</b> can now sign in to the Founder app with <span class="t-code">${founder.email}</span>.</div>
+        <div class="flex gap-3 mt-4" style="width:100%">
+          <button class="btn btn-secondary btn-full" onclick="App.go('dashboard')">Done</button>
+          <button class="btn btn-primary btn-full" onclick="App.openOrg('${org.id}')">View school</button>
+        </div>
+      </div>`;
+      UI.toast('School onboarded successfully');
+    },700);
+  },
+
+  /* ========================================================================
+     REPORTS  (real reports only; form follows data)
+     ======================================================================== */
+  Reports(el){
+    this._backTo='dashboard';
+    const sk=`${'<div class="card mb-3"><div class="sk sk-line" style="width:50%"></div><div class="sk" style="height:80px;margin-top:12px"></div></div>'.repeat(3)}`;
+    this.withLoading(el,sk,()=>{
+      const c=DB.planCounts();
+      if(c.total===0){
+        return `<div class="state">
+          <div class="state-ill">${icon('chart')}</div>
+          <div class="state-title">No data to report yet</div>
+          <div class="state-msg">Reports appear here once schools are onboarded. We only show reports backed by real data — never filler.</div>
+          <button class="btn btn-primary btn-lg mt-2" onclick="App.go('onboard')">${icon('plus')} Onboard a school</button>
+        </div>`;
+      }
+      // Report 1: plan distribution (donut) — composition → donut
+      const seg=[['Basic',c.basic,'var(--viz-1)'],['Pro',c.pro,'var(--viz-2)'],['Enterprise',c.enterprise,'var(--viz-3)']].filter(x=>x[1]>0);
+      let acc=0; const stops=seg.map(([l,v,col])=>{ const start=acc/c.total*360; acc+=v; const end=acc/c.total*360; return `${col} ${start}deg ${end}deg`; }).join(',');
+      // Report 2: onboarding trend (bar) — trend → bars
+      const trend=DB.onboardingTrend(); const max=Math.max(1,...trend.map(t=>t.count));
+      // Report 3: active vs inactive (comparison)
+      const inactive=c.total-c.active;
+      return `
+        <p class="t-caption mb-4">${icon('shield')} Platform reports · export-ready · real data only</p>
+
+        <div class="card mb-4">
+          <div class="flex between items-center mb-4"><div class="t-h3">Plan distribution</div><button class="btn btn-sm btn-secondary" onclick="App.notImplemented('Export')">Export</button></div>
+          <div class="flex gap-4 items-center">
+            <div class="donut" style="background:conic-gradient(${stops})"><div class="donut-center"><div><div class="t-data-lg">${c.total}</div><div class="t-caption">schools</div></div></div></div>
+            <div class="donut-legend">${seg.map(([l,v,col])=>`<div class="legend-item"><span class="legend-dot" style="background:${col}"></span><span class="flex-1">${l}</span><span class="t-data" style="font-weight:700">${v}</span></div>`).join('')}</div>
+          </div>
+        </div>
+
+        <div class="card mb-4">
+          <div class="flex between items-center mb-4"><div class="t-h3">Onboarding trend</div><button class="btn btn-sm btn-secondary" onclick="App.notImplemented('Export')">Export</button></div>
+          <div class="chart-bars">${trend.map(t=>`<div class="bar-col"><div class="bar-val">${t.count||''}</div><div class="bar" style="height:${(t.count/max)*100}%"></div><div class="bar-label">${t.label}</div></div>`).join('')}</div>
+        </div>
+
+        <div class="card">
+          <div class="flex between items-center mb-4"><div class="t-h3">Active vs inactive</div><button class="btn btn-sm btn-secondary" onclick="App.notImplemented('Export')">Export</button></div>
+          <div class="flex gap-3">
+            <div class="flex-1 text-center" style="padding:16px;background:var(--success-subtle);border-radius:var(--r-md)"><div class="t-data-lg" style="color:var(--success)">${c.active}</div><div class="t-caption">Active</div></div>
+            <div class="flex-1 text-center" style="padding:16px;background:${inactive?'var(--danger-subtle)':'var(--surface-sunken)'};border-radius:var(--r-md)"><div class="t-data-lg" style="color:${inactive?'var(--danger)':'var(--text-tertiary)'}">${inactive}</div><div class="t-caption">Inactive</div></div>
+          </div>
+        </div>
+      `;
+    });
+  },
+
+  /* ========================================================================
+     SETTINGS  (profile · theme picker · sign out)
+     ======================================================================== */
+  Settings(el){
+    const s=Auth.getSession(); const st=DB.getSettings();
+    el.innerHTML=`
+      <div class="card card-raised mb-4 flex gap-3 items-center">
+        <div class="avatar" style="width:56px;height:56px;font-size:18px;background:${avatarColor(s.name)}">${s.avatar||initials(s.name)}</div>
+        <div class="flex-1"><div class="t-h3">${s.name}</div><div class="row-sub">${s.role}</div></div>
+      </div>
+
+      <div class="sec-head"><div class="sec-title">My profile</div></div>
+      <div class="card card-pad-0 mb-4"><div class="list">
+        <div class="row" style="cursor:default"><div class="avatar avatar-sq" style="background:var(--info-subtle);color:var(--info)">${icon('mail')}</div><div class="row-main"><div class="row-title" style="font-weight:500">Email</div><div class="row-sub">${s.email}</div></div></div>
+        <div class="row" style="cursor:default"><div class="avatar avatar-sq" style="background:var(--brand-subtle);color:var(--brand)">${icon('shield')}</div><div class="row-main"><div class="row-title" style="font-weight:500">Role</div><div class="row-sub">${s.role} · full platform access</div></div></div>
+      </div></div>
+
+      <div class="sec-head"><div class="sec-title">Appearance</div></div>
+      <div class="card card-pad-0 mb-4"><div class="list">
+        <div class="row" onclick="App.openThemeSheet()">
+          <div class="avatar avatar-sq" style="background:var(--brand-subtle);color:var(--brand)">${icon('palette')}</div>
+          <div class="row-main"><div class="row-title" style="font-weight:500">Theme</div><div class="row-sub">${this.themeName(st.theme)} · ${st.mode}</div></div>
+          <span class="row-chev">${icon('chevronR')}</span>
+        </div>
+      </div></div>
+
+      <button class="btn btn-secondary btn-full" onclick="App.confirmLogout()">${icon('logout')} Sign out</button>
+      <p class="t-caption text-center mt-6">NextGen EduERP · ERP Admin · Prototype</p>
+    `;
+  },
+  themes:[['violet','Violet','#7C5CFF','Default'],['indigo','Indigo','#4F46E5',''],['emerald','Emerald','#059669',''],['slate','Slate','#475569',''],['amber','Warm Amber','#D97706',''],['contrast','High Contrast','#1D4ED8','Accessibility']],
+  themeName(k){ return (this.themes.find(t=>t[0]===k)||[])[1]||k; },
+  openThemeSheet(){
+    const st=DB.getSettings();
+    const {el,close}=UI.sheet(`
+      <div class="sheet-title">Appearance</div>
+      <div class="segmented mb-4" id="modeSeg">
+        ${[['light','Light'],['dark','Dark'],['system','Auto']].map(([k,l])=>`<button class="${st.mode===k?'active':''}" onclick="App.setMode('${k}')">${l}</button>`).join('')}
+      </div>
+      <div class="field-label mb-2">Theme</div>
+      <div id="themeList">${this.themes.map(([k,name,col,tag])=>`
+        <div class="row" style="border:none;padding:10px 4px" onclick="App.setTheme('${k}')">
+          <div style="width:36px;height:36px;border-radius:50%;background:${col};border:2px solid var(--border-subtle);flex-shrink:0"></div>
+          <div class="row-main"><div class="row-title" style="font-weight:600">${name}</div>${tag?`<div class="row-sub">${tag}</div>`:''}</div>
+          ${st.theme===k?`<span style="color:var(--brand)">${icon('check')}</span>`:''}
+        </div>`).join('')}</div>
+      <button class="btn btn-secondary btn-full mt-4" onclick="App._themeClose()">Done</button>
+    `);
+    this._themeSheetEl=el; this._themeClose=close;
+  },
+  setTheme(k){ DB.updateSettings({theme:k}); this.applyTheme(k,DB.getSettings().mode); this._refreshThemeSheet(); },
+  setMode(k){ DB.updateSettings({mode:k}); this.applyTheme(DB.getSettings().theme,k); this._refreshThemeSheet(); },
+  _refreshThemeSheet(){
+    const st=DB.getSettings();
+    // update mode segment
+    this._themeSheetEl.querySelectorAll('#modeSeg button').forEach(b=>b.classList.toggle('active',b.textContent.toLowerCase().startsWith(st.mode==='system'?'auto':st.mode)));
+    // update theme checks
+    const list=this._themeSheetEl.querySelector('#themeList');
+    list.innerHTML=this.themes.map(([k,name,col,tag])=>`
+      <div class="row" style="border:none;padding:10px 4px" onclick="App.setTheme('${k}')">
+        <div style="width:36px;height:36px;border-radius:50%;background:${col};border:2px solid var(--border-subtle);flex-shrink:0"></div>
+        <div class="row-main"><div class="row-title" style="font-weight:600">${name}</div>${tag?`<div class="row-sub">${tag}</div>`:''}</div>
+        ${st.theme===k?`<span style="color:var(--brand)">${icon('check')}</span>`:''}
+      </div>`).join('');
+  },
+  confirmLogout(){ UI.confirm({title:'Sign out?',message:'You will need to sign in again to access the console.',confirmText:'Sign out',danger:true}).then(ok=>{ if(ok)this.logout(); }); },
+
+  /* ========================================================================
+     MISC
+     ======================================================================== */
+  notImplemented(what){ UI.toast((what||'This')+' — demonstrated in a later stage','error'); },
+  resetPrompt(){ UI.confirm({title:'Reset demo data?',message:'All onboarded schools will be cleared. Only the platform admin remains.',confirmText:'Reset',danger:true}).then(ok=>{ if(ok){ DB.reset(); this.route='dashboard'; this.ctx={}; this.render(); UI.toast('Demo data reset'); } }); },
+};
+App.init();
+</script>
+</body>
+</html>
