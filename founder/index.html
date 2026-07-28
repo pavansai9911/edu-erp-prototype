@@ -1,0 +1,548 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="violet" data-mode="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<title>EduERP · Founder</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Sora:wght@600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../shared/tokens.css">
+<link rel="stylesheet" href="../shared/styles.css">
+</head>
+<body>
+<div class="viewport">
+  <div class="proto-banner" onclick="App.resetPrompt()">◆ FOUNDER PROTOTYPE · tap to reset demo data</div>
+  <div id="app"></div>
+</div>
+
+<script src="../shared/data.js"></script>
+<script src="../shared/auth.js"></script>
+<script src="../shared/utils.js"></script>
+<script src="../shared/founder-data.js"></script>
+<script>
+/* ============================================================================
+   FOUNDER APP — the BUY surface. "Show with reports, don't tell with text."
+   Rich, visual, premium. Rajesh's 9pm health-check + the reports that sell.
+   ============================================================================ */
+const App = {
+  route:'dashboard', ctx:{},
+  systemDark:window.matchMedia('(prefers-color-scheme:dark)').matches,
+  loadingMs:600,
+  F:FounderDB,
+
+  init(){
+    const s=this.F.settings();
+    this.applyTheme(s.theme||'violet', s.mode||'system');
+    window.matchMedia('(prefers-color-scheme:dark)').addEventListener('change',e=>{this.systemDark=e.matches;const st=this.F.settings();if((st.mode||'system')==='system')this.applyTheme(st.theme,'system');});
+    // auto-login as the demo founder for prototype convenience
+    if(!Auth.isLoggedIn()){ this._demoLogin(); }
+    this.render();
+  },
+  _demoLogin(){
+    sessionStorage.setItem(Auth.SESSION_KEY,JSON.stringify({userId:'FDR-DEMO',name:'Rajesh Kumar',email:'rajesh@sunrise.edu',role:'Founder',app:'founder',orgCode:'SPS-CHN',avatar:'RK',loginTime:new Date().toISOString()}));
+  },
+  applyTheme(theme,mode){ document.documentElement.dataset.theme=theme; document.documentElement.dataset.mode= mode==='system'?(this.systemDark?'dark':'light'):mode; },
+
+  /* ---------- shell ---------- */
+  render(){ document.getElementById('app').innerHTML=this.Shell(); this.mountScreen(); },
+  Shell(){
+    const tabs=[
+      {k:'dashboard',ic:'home',label:'Home'},
+      {k:'students',ic:'users',label:'Students'},
+      {k:'fees',ic:'wallet',label:'Fees'},
+      {k:'reports',ic:'chart',label:'Reports'},
+      {k:'more',ic:'settings',label:'More'},
+    ];
+    const isSub=this.ctx.sub;
+    return `${this.AppBar()}
+      <div class="content fade-in" id="screen"></div>
+      ${isSub?'':`<div class="tabbar">${tabs.map(t=>`<button class="tab ${this.route===t.k?'active':''}" onclick="App.go('${t.k}')">${icon(t.ic)}<span>${t.label}</span></button>`).join('')}</div>`}`;
+  },
+  AppBar(){
+    if(this.ctx.sub){
+      return `<div class="appbar sub">
+        <button class="appbar-btn" onclick="App.back()" aria-label="Back">${icon('chevronL')}</button>
+        <div class="appbar-id"><div class="appbar-title">${this.ctx.title||''}</div>${this.ctx.subtitle?`<div class="appbar-sub">${this.ctx.subtitle}</div>`:''}</div>
+        ${this.ctx.action||''}
+      </div>`;
+    }
+    const s=Auth.getSession(); const set=this.F.settings();
+    const titles={dashboard:this.greeting(),students:'Students',fees:'Fees',reports:'Reports',more:'More'};
+    const subtitle={dashboard:set.schoolName,students:'Student information',fees:'Collections & dues',reports:'Show, don\'t tell',more:'Manage your school'}[this.route];
+    return `<div class="appbar">
+      <div class="appbar-logo">${icon('building')}</div>
+      <div class="appbar-id">
+        <div class="appbar-title">${titles[this.route]||set.schoolName}</div>
+        <div class="appbar-sub">${icon('mapPin')} ${subtitle||set.schoolName}</div>
+      </div>
+      <button class="appbar-btn" onclick="App.notImplemented('Notifications')" aria-label="Alerts">${icon('bell')}<span class="appbar-dot"></span></button>
+      <div class="appbar-avatar" style="background:${avatarColor(s.name)}" onclick="App.go('more')">${s.avatar||initials(s.name)}</div>
+    </div>`;
+  },
+  greeting(){ const h=new Date().getHours(); const g=h<12?'Good morning':h<17?'Good afternoon':'Good evening'; return g+', '+Auth.getSession().name.split(' ')[0]; },
+
+  go(route,ctx={}){ this.route=route; this.ctx=ctx; this.render(); },
+  back(){ this.ctx={}; this.route=this._backTo||'dashboard'; this.render(); },
+  mountScreen(){
+    const el=document.getElementById('screen');
+    switch(this.route){
+      case 'dashboard': return this.Dashboard(el);
+      case 'students': return this.Students(el);
+      case 'student': return this.StudentDetail(el);
+      case 'fees': return this.Fees(el);
+      case 'reports': return this.Reports(el);
+      case 'report': return this.ReportView(el);
+      case 'more': return this.More(el);
+      case 'staff': return this.Staff(el);
+      case 'setup': return this.Setup(el);
+      case 'settings': return this.Settings(el);
+    }
+  },
+  withLoading(el,sk,build){ el.innerHTML=sk; setTimeout(()=>{ el.innerHTML=build(); if(this._after){this._after();this._after=null;} },this.loadingMs); },
+
+  /* ========================================================================
+     DASHBOARD — the 9pm health check. Visual-first. "Show, don't tell."
+     ======================================================================== */
+  Dashboard(el){
+    this._backTo='dashboard';
+    const sk=`<div class="sk" style="height:150px;border-radius:14px;margin-bottom:16px"></div>
+      <div class="grid-2 mb-3">${'<div class="kpi"><div class="sk sk-line" style="width:50%"></div><div class="sk" style="height:24px;width:60%;margin-top:8px"></div></div>'.repeat(2)}</div>
+      <div class="card"><div class="sk" style="height:120px"></div></div>`;
+    this.withLoading(el,sk,()=>{
+      const fs=this.F.feeSummary();
+      if(fs.count===0){
+        return `<div class="state"><div class="state-ill">${icon('sparkle')}</div><div class="state-title">Your school is set up</div><div class="state-msg">Add students and record fees to see your school's live health here.</div></div>`;
+      }
+      const att=this.F.attendanceToday();
+      const trend=this.F.collectionTrend(); const maxT=Math.max(1,...trend.map(t=>t.amount));
+      const pct=Math.round(fs.collected/fs.billed*100);
+      const recent=this.F.recentPayments(4);
+      return `
+        <!-- HERO: money collected (the number Rajesh opens the app for) -->
+        <div class="card card-raised mb-4" style="background:linear-gradient(135deg,var(--brand),var(--brand-hover));color:var(--text-on-brand);border:none">
+          <div style="font-size:var(--t-label);opacity:.85;font-weight:600;margin-bottom:6px">Collected this term</div>
+          <div style="font-family:var(--f-display);font-size:34px;font-weight:700;letter-spacing:-.02em;line-height:1">${fmt.money(fs.collected)}</div>
+          <div style="display:flex;align-items:center;gap:8px;margin-top:14px;font-size:var(--t-caption)">
+            <div style="flex:1;height:8px;background:rgba(255,255,255,.25);border-radius:99px;overflow:hidden"><div style="width:${pct}%;height:100%;background:#fff;border-radius:99px"></div></div>
+            <span style="font-weight:700">${pct}%</span>
+          </div>
+          <div style="font-size:var(--t-caption);opacity:.85;margin-top:8px">${fmt.money(fs.outstanding)} outstanding · ${fmt.money(fs.billed)} billed</div>
+        </div>
+
+        <!-- secondary KPIs -->
+        <div class="grid-2 mb-3">
+          ${this.miniKpi('users','Students',this.F.students().length,'var(--info)')}
+          ${this.miniKpi('check','Attendance today',att.pct+'%','var(--viz-positive)')}
+        </div>
+        <div class="grid-2 mb-4">
+          ${this.miniKpi('briefcase','Staff',this.F.staff().length,'var(--brand)')}
+          ${this.miniKpi('alert',(fs.partial+fs.unpaid)+' pending',fmt.moneyShort(fs.outstanding),'var(--viz-negative)',true)}
+        </div>
+
+        <!-- collection trend (SHOW) -->
+        <div class="card card-raised mb-4">
+          <div class="flex between items-center mb-4"><div class="sec-title">Collection trend</div><span class="t-caption">Last 6 months</span></div>
+          <div class="chart-bars">${trend.map(t=>`<div class="bar-col"><div class="bar-val">${t.amount?fmt.moneyShort(t.amount).replace('₹',''):''}</div><div class="bar pos" style="height:${(t.amount/maxT)*100}%"></div><div class="bar-label">${t.label}</div></div>`).join('')}</div>
+        </div>
+
+        <!-- fee status donut (SHOW) -->
+        ${this.feeStatusCard(fs)}
+
+        <!-- activity feed -->
+        <div class="sec-head"><div class="sec-title">Recent payments</div><button class="sec-link" onclick="App.go('fees')">View all</button></div>
+        <div class="card card-pad-0 mb-4"><div class="list">${recent.map(p=>this.paymentRow(p)).join('')}</div></div>
+
+        <div class="dashed-card">${icon('sparkle')} <span class="t-label" style="color:var(--text-tertiary)">AI insights arrive with Enterprise</span></div>
+      `;
+    });
+  },
+  miniKpi(ic,label,value,color,danger){
+    return `<div class="kpi"><div class="flex items-center gap-2 mb-1"><span style="color:${color};display:grid">${icon(ic)}</span><span class="kpi-label" style="margin:0">${label}</span></div>
+      <div class="kpi-value" style="font-size:22px;${danger?'color:var(--viz-negative)':''}">${value}</div></div>`;
+  },
+  feeStatusCard(fs){
+    const seg=[['Paid',fs.paid,'var(--viz-positive)'],['Partial',fs.partial,'var(--viz-warning)'],['Unpaid',fs.unpaid,'var(--viz-negative)']].filter(x=>x[1]>0);
+    let acc=0; const stops=seg.map(([l,v,c])=>{ const a=acc/fs.count*360; acc+=v; return `${c} ${a}deg ${acc/fs.count*360}deg`; }).join(',');
+    return `<div class="card mb-4">
+      <div class="sec-title mb-4">Fee status</div>
+      <div class="flex gap-4 items-center">
+        <div class="donut" style="background:conic-gradient(${stops})"><div class="donut-center"><div><div class="t-data-lg">${fs.count}</div><div class="t-caption">invoices</div></div></div></div>
+        <div class="donut-legend">${seg.map(([l,v,c])=>`<div class="legend-item"><span class="legend-dot" style="background:${c}"></span><span class="flex-1">${l}</span><span class="t-data" style="font-weight:700">${v}</span></div>`).join('')}</div>
+      </div></div>`;
+  },
+  paymentRow(p){
+    return `<div class="row" style="cursor:default">
+      <div class="avatar" style="background:${avatarColor(p.studentName)}">${initials(p.studentName)}</div>
+      <div class="row-main"><div class="row-title">${p.studentName}</div><div class="row-sub">${p.mode} · ${fmt.ago(p.at)}</div></div>
+      <div class="row-trail"><span class="t-data" style="font-weight:700;color:var(--viz-positive)">+${fmt.money(p.amount)}</span></div>
+    </div>`;
+  },
+
+  /* ========================================================================
+     STUDENTS — SIS list + detail (4 lazy tabs)
+     ======================================================================== */
+  Students(el){
+    this._backTo='dashboard'; this._stuSearch=this._stuSearch||''; this._stuFilter=this._stuFilter||'all';
+    const sk=`<div class="sk" style="height:48px;margin-bottom:16px"></div>${'<div class="sk-row"><div class="sk sk-circle"></div><div style="flex:1"><div class="sk sk-line" style="width:60%"></div><div class="sk sk-line" style="width:40%"></div></div></div>'.repeat(6)}`;
+    this.withLoading(el,sk,()=>this.studentsMarkup());
+  },
+  studentsMarkup(){
+    const all=this.F.students();
+    if(all.length===0) return `<div class="state"><div class="state-ill">${icon('users')}</div><div class="state-title">No students yet</div><div class="state-msg">Students appear here once admitted. Add them from Setup or the Staff app.</div></div>`;
+    const q=(this._stuSearch||'').toLowerCase(); const f=this._stuFilter||'all';
+    const sections=[...new Set(all.map(s=>s.section))];
+    let list=all.filter(s=>{
+      const mq=!q||s.name.toLowerCase().includes(q)||s.section.toLowerCase().includes(q)||s.admissionNo.toLowerCase().includes(q);
+      const mf=f==='all'||s.section===f;
+      return mq&&mf;
+    });
+    return `
+      <div class="input-affix mb-3"><span style="position:absolute;left:14px;color:var(--text-tertiary);display:grid">${icon('search')}</span>
+        <input class="input" style="padding-left:42px" placeholder="Search name, section, admission no…" value="${this._stuSearch||''}" oninput="App.searchStu(this.value)"></div>
+      <div class="filter-row">
+        <button class="filter-chip ${f==='all'?'active':''}" onclick="App.filterStu('all')">All ${all.length}</button>
+        ${sections.map(sec=>`<button class="filter-chip ${f===sec?'active':''}" onclick="App.filterStu('${sec}')">${sec}</button>`).join('')}
+      </div>
+      ${list.length===0?`<div class="state" style="min-height:36vh"><div class="state-ill">${icon('search')}</div><div class="state-title">No matches</div><div class="state-msg">Try a different search or section.</div></div>`
+        :`<div class="card card-pad-0"><div class="list">${list.map(s=>this.studentRow(s)).join('')}</div></div><p class="t-caption text-center mt-3">${list.length} of ${all.length} students</p>`}
+    `;
+  },
+  studentRow(s){
+    const inv=this.F.invoiceForStudent(s.id);
+    const chip=inv.status==='Paid'?'chip-success':inv.status==='Partial'?'chip-warning':'chip-danger';
+    return `<div class="row" onclick="App.openStudent('${s.id}')">
+      <div class="avatar" style="background:${avatarColor(s.name)}">${initials(s.name)}</div>
+      <div class="row-main"><div class="row-title">${s.name}</div><div class="row-sub">${s.section} · Roll ${s.roll}</div></div>
+      <div class="row-trail"><span class="chip ${chip}">${inv.status}</span></div>
+      <span class="row-chev">${icon('chevronR')}</span>
+    </div>`;
+  },
+  searchStu(v){ this._stuSearch=v; const el=document.getElementById('screen'); const sc=el.scrollTop; el.innerHTML=this.studentsMarkup(); el.scrollTop=sc; const i=el.querySelector('input'); if(i){i.focus();i.setSelectionRange(v.length,v.length);} },
+  filterStu(f){ this._stuFilter=f; document.getElementById('screen').innerHTML=this.studentsMarkup(); },
+
+  openStudent(id){ this.go('student',{sub:true,id,tab:'profile',title:'',_back:'students'}); },
+  StudentDetail(el){
+    const s=this.F.studentById(this.ctx.id); if(!s){ el.innerHTML='<div class="state"><div class="state-title">Not found</div></div>'; return; }
+    this._backTo='students';
+    this.ctx.title=s.name; this.ctx.subtitle=`${s.section} · ${s.admissionNo}`;
+    document.querySelector('.appbar')?.remove(); document.getElementById('app').insertAdjacentHTML('afterbegin',this.AppBar());
+    const tab=this.ctx.tab||'profile';
+    el.innerHTML=`
+      <div class="card card-raised mb-4 flex gap-3 items-center">
+        <div class="avatar" style="width:56px;height:56px;font-size:18px;background:${avatarColor(s.name)}">${initials(s.name)}</div>
+        <div class="flex-1"><div class="t-h2" style="line-height:1.2">${s.name}</div><div class="row-sub mt-1">${s.gender} · ${s.section} · Roll ${s.roll}</div></div>
+      </div>
+      <div class="tabs mb-4">
+        ${['profile','guardians','attendance','fees'].map(t=>`<button class="${tab===t?'active':''}" onclick="App.stuTab('${t}')">${t[0].toUpperCase()+t.slice(1)}</button>`).join('')}
+      </div><div id="stuTab"></div>`;
+    this.renderStuTab(s,tab);
+  },
+  stuTab(t){ this.ctx.tab=t; document.querySelectorAll('#screen .tabs button').forEach(b=>b.classList.toggle('active',b.textContent.toLowerCase()===t)); this.renderStuTab(this.F.studentById(this.ctx.id),t); },
+  renderStuTab(s,t){
+    const box=document.getElementById('stuTab'); if(!box)return;
+    // lazy load feel
+    box.innerHTML=`<div class="sk" style="height:120px"></div>`;
+    setTimeout(()=>{
+      if(t==='profile'){
+        box.innerHTML=`<div class="card"><div class="dl">
+          <div class="dl-row"><span class="dl-key">Admission no.</span><span class="dl-val t-code">${s.admissionNo}</span></div>
+          <div class="dl-row"><span class="dl-key">Section</span><span class="dl-val">${s.section}</span></div>
+          <div class="dl-row"><span class="dl-key">Roll number</span><span class="dl-val">${s.roll}</span></div>
+          <div class="dl-row"><span class="dl-key">Gender</span><span class="dl-val">${s.gender}</span></div>
+          <div class="dl-row"><span class="dl-key">Joined</span><span class="dl-val">${fmt.date(s.joinedAt)}</span></div>
+          <div class="dl-row"><span class="dl-key">Status</span><span class="dl-val"><span class="chip chip-success"><span class="chip-dot"></span>Active</span></span></div>
+        </div></div>`;
+      } else if(t==='guardians'){
+        box.innerHTML=`<div class="card card-pad-0"><div class="list"><div class="row" style="cursor:default">
+          <div class="avatar" style="background:${avatarColor(s.guardian.name)}">${initials(s.guardian.name)}</div>
+          <div class="row-main"><div class="row-title">${s.guardian.name}</div><div class="row-sub">${s.guardian.relation} · ${s.guardian.phone}</div></div>
+        </div></div></div>
+        <div class="dashed-card mt-3">${icon('users')} <span class="t-caption">Guardian logins unlock with the Parent app (Pro plan)</span></div>`;
+      } else if(t==='attendance'){
+        const pct=88+(s.id.charCodeAt(6)%10);
+        box.innerHTML=`<div class="card mb-3 text-center">
+          <div class="t-data-lg" style="color:var(--viz-positive);font-size:32px">${pct}%</div>
+          <div class="t-caption">attendance this term</div></div>
+          <div class="card"><div class="flex between mb-2"><span class="t-label">Present</span><span class="t-data" style="font-weight:700">${Math.round(pct*1.1)} days</span></div>
+          <div class="flex between"><span class="t-label">Absent</span><span class="t-data" style="font-weight:700;color:var(--viz-negative)">${Math.round((100-pct)*0.6)} days</span></div></div>`;
+      } else if(t==='fees'){
+        const inv=this.F.invoiceForStudent(s.id); const pays=this.F.paymentsForStudent(s.id);
+        box.innerHTML=`
+          <div class="card mb-3">
+            <div class="flex between items-center mb-3"><span class="t-h3">Invoice ${inv.id}</span><span class="chip ${inv.status==='Paid'?'chip-success':inv.status==='Partial'?'chip-warning':'chip-danger'}">${inv.status}</span></div>
+            <div class="dl">${inv.items.map(it=>`<div class="dl-row"><span class="dl-key">${it.type}</span><span class="dl-val t-data">${fmt.money(it.amount)}</span></div>`).join('')}
+              <div class="dl-row" style="border-top:2px solid var(--border-strong)"><span class="dl-key" style="font-weight:700;color:var(--text-primary)">Total billed</span><span class="dl-val t-data">${fmt.money(inv.total)}</span></div>
+              <div class="dl-row"><span class="dl-key">Paid</span><span class="dl-val t-data" style="color:var(--viz-positive)">${fmt.money(inv.paid)}</span></div>
+              ${inv.total-inv.paid>0?`<div class="dl-row"><span class="dl-key">Outstanding</span><span class="dl-val t-data" style="color:var(--viz-negative)">${fmt.money(inv.total-inv.paid)}</span></div>`:''}
+            </div>
+          </div>
+          ${s.concession>0?`<div class="dashed-card mb-3" style="border-color:var(--viz-positive);color:var(--viz-positive)">${icon('check')} ${Math.round(s.concession*100)}% concession applied on tuition</div>`:''}
+          ${pays.length?`<div class="sec-head"><div class="sec-title">Payments</div></div><div class="card card-pad-0"><div class="list">${pays.map(p=>`<div class="row" style="cursor:default"><div class="avatar avatar-sq" style="background:var(--success-subtle);color:var(--success)">${icon('wallet')}</div><div class="row-main"><div class="row-title">${fmt.money(p.amount)}</div><div class="row-sub">${p.mode} · ${fmt.date(p.at)} · ${p.id}</div></div></div>`).join('')}</div></div>`:'<div class="dashed-card">No payments recorded yet</div>'}
+        `;
+      }
+    },300);
+  },
+
+  /* ========================================================================
+     FEES — the money wedge, Founder view. Flexible ledger made visible.
+     ======================================================================== */
+  Fees(el){
+    this._backTo='dashboard';
+    const sk=`<div class="sk" style="height:120px;border-radius:14px;margin-bottom:16px"></div><div class="sk" style="height:180px;border-radius:14px"></div>`;
+    this.withLoading(el,sk,()=>{
+      const fs=this.F.feeSummary();
+      if(fs.count===0) return `<div class="state"><div class="state-ill">${icon('wallet')}</div><div class="state-title">No collections yet</div><div class="state-msg">Fee collections recorded by your accountant appear here in real time.</div></div>`;
+      const byType=this.F.collectionByType(); const maxType=Math.max(...byType.map(t=>t.amount));
+      const byMode=this.F.collectionByMode(); const totalMode=Object.values(byMode).reduce((a,b)=>a+b,0);
+      const defaulters=this.F.defaulters().slice(0,5);
+      return `
+        <div class="card card-raised mb-4" style="background:linear-gradient(135deg,var(--brand),var(--brand-hover));color:var(--text-on-brand);border:none">
+          <div style="font-size:var(--t-label);opacity:.85;font-weight:600;margin-bottom:6px">Total collected this term</div>
+          <div style="font-family:var(--f-display);font-size:32px;font-weight:700;letter-spacing:-.02em">${fmt.money(fs.collected)}</div>
+          <div style="font-size:var(--t-caption);opacity:.85;margin-top:8px">${fmt.money(fs.outstanding)} still outstanding</div>
+        </div>
+
+        <!-- BY ITEM TYPE: the flexible-ledger value proof -->
+        <div class="card mb-4">
+          <div class="sec-title mb-1">Collection by item type</div>
+          <p class="t-caption mb-4">Not just school fees — every chargeable item, tracked.</p>
+          ${byType.map(t=>`<div class="mb-3"><div class="flex between mb-1"><span class="t-label">${t.type}</span><span class="t-data" style="font-weight:700">${fmt.money(t.amount)}</span></div>
+            <div style="height:8px;background:var(--surface-sunken);border-radius:99px;overflow:hidden"><div style="width:${(t.amount/maxType)*100}%;height:100%;background:var(--brand);border-radius:99px"></div></div></div>`).join('')}
+        </div>
+
+        <!-- BY MODE -->
+        <div class="card mb-4">
+          <div class="sec-title mb-4">Collection by mode</div>
+          <div class="flex gap-3">
+            ${Object.entries(byMode).map(([m,v])=>`<div class="flex-1 text-center" style="padding:14px 8px;background:var(--surface-sunken);border-radius:var(--r-md)">
+              <div class="t-data" style="font-weight:700;font-size:15px">${fmt.moneyShort(v)}</div><div class="t-caption">${m}</div>
+              <div style="font-size:11px;color:var(--text-tertiary);margin-top:2px">${Math.round(v/totalMode*100)}%</div></div>`).join('')}
+          </div>
+        </div>
+
+        <!-- DEFAULTERS -->
+        <div class="sec-head"><div class="sec-title">Top outstanding</div><button class="sec-link" onclick="App.go('reports')">Full report</button></div>
+        <div class="card card-pad-0"><div class="list">${defaulters.map(d=>`<div class="row" onclick="App.openStudent('${d.studentId}')">
+          <div class="avatar" style="background:${avatarColor(d.studentName)}">${initials(d.studentName)}</div>
+          <div class="row-main"><div class="row-title">${d.studentName}</div><div class="row-sub">${d.section} · ${d.status}</div></div>
+          <div class="row-trail"><span class="t-data" style="font-weight:700;color:var(--viz-negative)">${fmt.money(d.due)}</span></div>
+          <span class="row-chev">${icon('chevronR')}</span></div>`).join('')}</div></div>
+        <p class="t-caption text-center mt-3">You view collections here. Your accountant records them in the Staff app.</p>
+      `;
+    });
+  },
+
+  /* ========================================================================
+     REPORTS — the BUY centerpiece. Form follows data. Real only.
+     ======================================================================== */
+  Reports(el){
+    this._backTo='dashboard';
+    const sk=`${'<div class="card mb-3"><div class="sk sk-line" style="width:40%"></div><div class="sk sk-line" style="width:70%"></div></div>'.repeat(4)}`;
+    this.withLoading(el,sk,()=>{
+      const fs=this.F.feeSummary();
+      if(fs.count===0) return `<div class="state"><div class="state-ill">${icon('chart')}</div><div class="state-title">No data to report yet</div><div class="state-msg">Reports appear here as your school records data. We only show reports backed by real data — never filler.</div></div>`;
+      const reports=[
+        {id:'collection-trend',ic:'trend',name:'Fee collection over time',desc:'Monthly collection · line trend',form:'Chart'},
+        {id:'by-type',ic:'wallet',name:'Collection by item type',desc:'Tuition vs add-ons · comparison',form:'Comparison'},
+        {id:'defaulters',ic:'alert',name:'Outstanding & defaulters',desc:'Who owes what · table',form:'Table'},
+        {id:'fee-status',ic:'chart',name:'Fee status breakdown',desc:'Paid / partial / unpaid · donut',form:'Chart'},
+        {id:'attendance',ic:'check',name:'Attendance overview',desc:'Section-wise · comparison',form:'Comparison'},
+      ];
+      return `<p class="t-caption mb-4">${icon('sparkle')} Show, don't tell · presentation-grade · export-ready · real data only</p>
+        <div class="card card-pad-0"><div class="list">
+        ${reports.map(r=>`<div class="row" onclick="App.openReport('${r.id}')">
+          <div class="avatar avatar-sq" style="background:var(--brand-subtle);color:var(--brand)">${icon(r.ic)}</div>
+          <div class="row-main"><div class="row-title">${r.name}</div><div class="row-sub">${r.desc}</div></div>
+          <div class="row-trail"><span class="chip chip-neutral">${r.form}</span></div>
+          <span class="row-chev">${icon('chevronR')}</span>
+        </div>`).join('')}
+        </div></div>
+        <p class="t-caption text-center mt-4">Each report renders in the form that fits its data — never forced into a graph.</p>`;
+    });
+  },
+  openReport(id){ this.go('report',{sub:true,id,title:'Report',_back:'reports'}); },
+  ReportView(el){
+    this._backTo='reports';
+    const id=this.ctx.id;
+    const titles={'collection-trend':'Fee collection over time','by-type':'Collection by item type','defaulters':'Outstanding & defaulters','fee-status':'Fee status breakdown','attendance':'Attendance overview'};
+    this.ctx.title=titles[id]||'Report'; this.ctx.subtitle='Sunrise Public School';
+    this.ctx.action=`<button class="appbar-btn" onclick="App.notImplemented('Export')" aria-label="Export">${icon('chart')}</button>`;
+    document.querySelector('.appbar')?.remove(); document.getElementById('app').insertAdjacentHTML('afterbegin',this.AppBar());
+    const sk=`<div class="sk" style="height:220px;border-radius:14px"></div>`;
+    this.withLoading(el,sk,()=>{
+      let body='';
+      if(id==='collection-trend'){
+        const trend=this.F.collectionTrend(); const max=Math.max(1,...trend.map(t=>t.amount));
+        body=`<div class="card mb-4"><div class="sec-title mb-4">Monthly collection</div>
+          <div class="chart-bars" style="height:160px">${trend.map(t=>`<div class="bar-col"><div class="bar-val">${t.amount?fmt.moneyShort(t.amount).replace('₹',''):''}</div><div class="bar pos" style="height:${(t.amount/max)*100}%"></div><div class="bar-label">${t.label}</div></div>`).join('')}</div></div>
+          <div class="card"><div class="dl">${trend.filter(t=>t.amount).map(t=>`<div class="dl-row"><span class="dl-key">${t.label}</span><span class="dl-val t-data">${fmt.money(t.amount)}</span></div>`).join('')}</div></div>`;
+      } else if(id==='by-type'){
+        const byType=this.F.collectionByType(); const max=Math.max(...byType.map(t=>t.amount));
+        body=`<div class="card"><div class="sec-title mb-1">Tuition vs add-ons</div><p class="t-caption mb-4">The flexible-ledger value: revenue beyond school fees.</p>
+          ${byType.map((t,i)=>`<div class="mb-3"><div class="flex between mb-1"><span class="t-label">${t.type}</span><span class="t-data" style="font-weight:700">${fmt.money(t.amount)}</span></div>
+          <div style="height:10px;background:var(--surface-sunken);border-radius:99px;overflow:hidden"><div style="width:${(t.amount/max)*100}%;height:100%;background:var(--viz-${(i%8)+1});border-radius:99px"></div></div></div>`).join('')}</div>`;
+      } else if(id==='defaulters'){
+        const d=this.F.defaulters();
+        body=`<div class="card card-pad-0"><div class="card-head"><h3>Outstanding by student</h3><span class="chip chip-danger">${d.length}</span></div>
+          <div class="list">${d.map(x=>`<div class="row" onclick="App.openStudent('${x.studentId}')"><div class="avatar" style="background:${avatarColor(x.studentName)}">${initials(x.studentName)}</div>
+          <div class="row-main"><div class="row-title">${x.studentName}</div><div class="row-sub">${x.section} · ${x.status}</div></div>
+          <div class="row-trail"><span class="t-data" style="font-weight:700;color:var(--viz-negative)">${fmt.money(x.due)}</span></div></div>`).join('')}</div></div>`;
+      } else if(id==='fee-status'){
+        const fs=this.F.feeSummary();
+        body=this.feeStatusCard(fs)+`<div class="card"><div class="dl">
+          <div class="dl-row"><span class="dl-key">Total billed</span><span class="dl-val t-data">${fmt.money(fs.billed)}</span></div>
+          <div class="dl-row"><span class="dl-key">Collected</span><span class="dl-val t-data" style="color:var(--viz-positive)">${fmt.money(fs.collected)}</span></div>
+          <div class="dl-row"><span class="dl-key">Outstanding</span><span class="dl-val t-data" style="color:var(--viz-negative)">${fmt.money(fs.outstanding)}</span></div></div></div>`;
+      } else if(id==='attendance'){
+        const secs={};
+        this.F.students().forEach(s=>{ secs[s.section]=(secs[s.section]||0)+1; });
+        const rows=Object.entries(secs).map(([sec,n])=>({sec,n,pct:85+(sec.charCodeAt(0)%13)}));
+        const max=100;
+        body=`<div class="card"><div class="sec-title mb-4">Attendance by section</div>
+          ${rows.map(r=>`<div class="mb-3"><div class="flex between mb-1"><span class="t-label">${r.sec} <span class="t-caption">(${r.n})</span></span><span class="t-data" style="font-weight:700">${r.pct}%</span></div>
+          <div style="height:8px;background:var(--surface-sunken);border-radius:99px;overflow:hidden"><div style="width:${r.pct}%;height:100%;background:${r.pct>=90?'var(--viz-positive)':r.pct>=80?'var(--viz-warning)':'var(--viz-negative)'};border-radius:99px"></div></div></div>`).join('')}</div>`;
+      }
+      return body+`<button class="btn btn-secondary btn-full mt-4" onclick="App.notImplemented('Export')">${icon('chart')} Export as PDF</button>`;
+    });
+  },
+
+  /* ========================================================================
+     MORE — hub for Staff, Setup, Settings
+     ======================================================================== */
+  More(el){
+    this._backTo='dashboard';
+    const s=Auth.getSession(); const set=this.F.settings();
+    el.innerHTML=`
+      <div class="card card-raised mb-4 flex gap-3 items-center">
+        <div class="avatar" style="width:52px;height:52px;font-size:16px;background:${avatarColor(s.name)}">${s.avatar}</div>
+        <div class="flex-1"><div class="t-h3">${s.name}</div><div class="row-sub">${s.role} · ${set.schoolName}</div></div>
+      </div>
+      <div class="card card-pad-0 mb-4"><div class="list">
+        ${this.moreRow('briefcase','Staff','View your team & hierarchy','staff')}
+        ${this.moreRow('settings','School setup','Profile, branches, fees, staff','setup')}
+        ${this.moreRow('palette','Appearance','Theme & display','__theme')}
+      </div></div>
+      <div class="card card-pad-0 mb-4"><div class="list">
+        ${this.moreRow('user','Settings','Account & preferences','settings')}
+      </div></div>
+      <button class="btn btn-secondary btn-full" onclick="App.confirmLogout()">${icon('logout')} Sign out</button>
+      <p class="t-caption text-center mt-6">NextGen EduERP · Founder · Prototype</p>`;
+  },
+  moreRow(ic,title,sub,route){
+    const onclick = route==='__theme'?'App.openThemeSheet()':`App.go('${route}')`;
+    return `<div class="row" onclick="${onclick}">
+      <div class="avatar avatar-sq" style="background:var(--brand-subtle);color:var(--brand)">${icon(ic)}</div>
+      <div class="row-main"><div class="row-title" style="font-weight:500">${title}</div><div class="row-sub">${sub}</div></div>
+      <span class="row-chev">${icon('chevronR')}</span></div>`;
+  },
+
+  /* ---- Staff hierarchy ---- */
+  Staff(el){
+    this._backTo='more'; this.ctx.sub=true; this.ctx.title='Staff'; this.ctx.subtitle='Your team';
+    document.querySelector('.appbar')?.remove(); document.getElementById('app').insertAdjacentHTML('afterbegin',this.AppBar());
+    const sk=`${'<div class="sk-row"><div class="sk sk-circle"></div><div style="flex:1"><div class="sk sk-line" style="width:50%"></div><div class="sk sk-line" style="width:30%"></div></div></div>'.repeat(5)}`;
+    this.withLoading(el,sk,()=>{
+      const staff=this.F.staff(); const principal=staff.find(s=>!s.reportsTo); const reports=staff.filter(s=>s.reportsTo);
+      const roleChip=r=>r==='Principal'?'chip-brand':r==='Accountant'?'chip-info':r==='Receptionist'?'chip-warning':'chip-neutral';
+      return `
+        <div class="sec-head"><div class="sec-title">Leadership</div></div>
+        <div class="card card-pad-0 mb-4"><div class="list">${this.staffRow(principal,roleChip)}</div></div>
+        <div class="sec-head"><div class="sec-title">Reporting to ${principal.name.split(' ')[0]}</div><span class="t-caption">${reports.length}</span></div>
+        <div class="card card-pad-0"><div class="list">${reports.map(s=>this.staffRow(s,roleChip)).join('')}</div></div>
+      `;
+    });
+  },
+  staffRow(s,roleChip){
+    return `<div class="row" onclick="App.openStaff('${s.id}')">
+      <div class="avatar" style="background:${avatarColor(s.name)}">${initials(s.name)}</div>
+      <div class="row-main"><div class="row-title">${s.name}</div><div class="row-sub">${s.section?s.role+' · '+s.section:s.role}</div></div>
+      <div class="row-trail"><span class="chip ${roleChip(s.role)}">${s.role}</span></div>
+      <span class="row-chev">${icon('chevronR')}</span></div>`;
+  },
+  openStaff(id){
+    const s=this.F.staffById(id);
+    UI.sheet(`<div class="sheet-title">${s.name}</div>
+      <div class="flex gap-3 items-center mb-4"><div class="avatar" style="width:56px;height:56px;font-size:18px;background:${avatarColor(s.name)}">${initials(s.name)}</div>
+      <div><div class="chip chip-brand">${s.role}</div>${s.section?`<div class="row-sub mt-1">Class teacher · ${s.section}</div>`:''}</div></div>
+      <div class="card"><div class="dl">
+        <div class="dl-row"><span class="dl-key">${icon('mail')} Email</span><span class="dl-val">${s.email}</span></div>
+        <div class="dl-row"><span class="dl-key">${icon('phone')} Phone</span><span class="dl-val">${s.phone}</span></div>
+        <div class="dl-row"><span class="dl-key">Reports to</span><span class="dl-val">${s.reportsTo?this.F.staffById(s.reportsTo).name:'—'}</span></div>
+      </div></div>
+      <p class="t-caption text-center mt-4">Staff logins & permissions are managed in Setup.</p>`);
+  },
+
+  /* ---- Setup ---- */
+  Setup(el){
+    this._backTo='more'; this.ctx.sub=true; this.ctx.title='School setup'; this.ctx.subtitle='Configure your school';
+    document.querySelector('.appbar')?.remove(); document.getElementById('app').insertAdjacentHTML('afterbegin',this.AppBar());
+    const set=this.F.settings();
+    el.innerHTML=`
+      <div class="sec-head"><div class="sec-title">School profile</div></div>
+      <div class="card card-pad-0 mb-4"><div class="list">
+        ${this.setupRow('building','School name',set.schoolName)}
+        ${this.setupRow('mapPin','Branch','Main Campus')}
+        ${this.setupRow('calendar','Academic year','2026-27')}
+      </div></div>
+      <div class="sec-head"><div class="sec-title">Fee structure</div><span class="chip chip-brand">Flexible</span></div>
+      <div class="card card-pad-0 mb-4"><div class="list">
+        ${this.feeTypeRow('Tuition','₹18,000 base')}
+        ${this.feeTypeRow('Transport','₹6,000 · optional')}
+        ${this.feeTypeRow('Books & Stationery','₹3,500')}
+        ${this.feeTypeRow('Uniform','₹2,200 · optional')}
+        ${this.feeTypeRow('Activity & Sports','₹1,500')}
+      </div></div>
+      <button class="btn btn-secondary btn-full mb-4" onclick="App.notImplemented('Add fee item')">${icon('plus')} Add chargeable item</button>
+      <div class="dashed-card">${icon('sparkle')} Define any chargeable item — books, bags, events, trips. Fees are never limited to tuition.</div>
+    `;
+  },
+  setupRow(ic,label,val){ return `<div class="row" onclick="App.notImplemented('Edit')"><div class="avatar avatar-sq" style="background:var(--brand-subtle);color:var(--brand)">${icon(ic)}</div><div class="row-main"><div class="row-title" style="font-weight:500">${label}</div><div class="row-sub">${val}</div></div><span class="row-chev">${icon('edit')}</span></div>`; },
+  feeTypeRow(name,detail){ return `<div class="row" onclick="App.notImplemented('Edit fee item')"><div class="avatar avatar-sq" style="background:var(--success-subtle);color:var(--success)">${icon('wallet')}</div><div class="row-main"><div class="row-title" style="font-weight:500">${name}</div><div class="row-sub">${detail}</div></div><span class="row-chev">${icon('chevronR')}</span></div>`; },
+
+  /* ---- Settings ---- */
+  Settings(el){
+    this._backTo='more'; this.ctx.sub=true; this.ctx.title='Settings'; this.ctx.subtitle='Account & preferences';
+    document.querySelector('.appbar')?.remove(); document.getElementById('app').insertAdjacentHTML('afterbegin',this.AppBar());
+    const s=Auth.getSession(); const set=this.F.settings();
+    el.innerHTML=`
+      <div class="card card-pad-0 mb-4"><div class="list">
+        <div class="row" style="cursor:default"><div class="avatar avatar-sq" style="background:var(--info-subtle);color:var(--info)">${icon('mail')}</div><div class="row-main"><div class="row-title" style="font-weight:500">Email</div><div class="row-sub">${s.email}</div></div></div>
+        <div class="row" style="cursor:default"><div class="avatar avatar-sq" style="background:var(--brand-subtle);color:var(--brand)">${icon('shield')}</div><div class="row-main"><div class="row-title" style="font-weight:500">Organization code</div><div class="row-sub t-code">${s.orgCode}</div></div></div>
+      </div></div>
+      <div class="card card-pad-0 mb-4"><div class="list">
+        <div class="row" onclick="App.openThemeSheet()"><div class="avatar avatar-sq" style="background:var(--brand-subtle);color:var(--brand)">${icon('palette')}</div><div class="row-main"><div class="row-title" style="font-weight:500">Theme</div><div class="row-sub">${this.themeName(set.theme)} · ${set.mode}</div></div><span class="row-chev">${icon('chevronR')}</span></div>
+      </div></div>
+      <button class="btn btn-secondary btn-full" onclick="App.confirmLogout()">${icon('logout')} Sign out</button>`;
+  },
+
+  /* ---- theme sheet (shared pattern) ---- */
+  themes:[['violet','Violet','#7C5CFF','Default'],['indigo','Indigo','#4F46E5',''],['emerald','Emerald','#059669',''],['slate','Slate','#475569',''],['amber','Warm Amber','#D97706',''],['contrast','High Contrast','#1D4ED8','Accessibility']],
+  themeName(k){ return (this.themes.find(t=>t[0]===k)||[])[1]||k; },
+  openThemeSheet(){
+    const st=this.F.settings();
+    const {el,close}=UI.sheet(`<div class="sheet-title">Appearance</div>
+      <div class="segmented mb-4" id="modeSeg">${[['light','Light'],['dark','Dark'],['system','Auto']].map(([k,l])=>`<button class="${st.mode===k?'active':''}" onclick="App.setMode('${k}')">${l}</button>`).join('')}</div>
+      <div class="field-label mb-2">Theme</div><div id="themeList"></div>
+      <button class="btn btn-secondary btn-full mt-4" onclick="App._themeClose()">Done</button>`);
+    this._themeSheetEl=el; this._themeClose=close; this._renderThemeList();
+  },
+  _renderThemeList(){
+    const st=this.F.settings();
+    this._themeSheetEl.querySelector('#themeList').innerHTML=this.themes.map(([k,name,col,tag])=>`
+      <div class="row" style="border:none;padding:10px 4px" onclick="App.setTheme('${k}')">
+        <div style="width:36px;height:36px;border-radius:50%;background:${col};border:2px solid var(--border-subtle);flex-shrink:0"></div>
+        <div class="row-main"><div class="row-title" style="font-weight:600">${name}</div>${tag?`<div class="row-sub">${tag}</div>`:''}</div>
+        ${st.theme===k?`<span style="color:var(--brand)">${icon('check')}</span>`:''}</div>`).join('');
+  },
+  setTheme(k){ this.F.updateSettings({theme:k}); this.applyTheme(k,this.F.settings().mode); this._renderThemeList(); },
+  setMode(k){ this.F.updateSettings({mode:k}); this.applyTheme(this.F.settings().theme,k); this._themeSheetEl.querySelectorAll('#modeSeg button').forEach(b=>b.classList.toggle('active',b.textContent.toLowerCase().startsWith(k==='system'?'auto':k))); },
+
+  /* ---- misc ---- */
+  notImplemented(w){ UI.toast((w||'This')+' — demonstrated in a later stage','error'); },
+  confirmLogout(){ UI.confirm({title:'Sign out?',message:'You will need to sign in again.',confirmText:'Sign out',danger:true}).then(ok=>{ if(ok){ Auth.logout(); location.reload(); } }); },
+  resetPrompt(){ UI.confirm({title:'Reset demo data?',message:'The demo school data will be regenerated.',confirmText:'Reset',danger:true}).then(ok=>{ if(ok){ this.F.reset(); this.route='dashboard'; this.ctx={}; this.render(); UI.toast('Demo data reset'); } }); },
+};
+App.init();
+</script>
+</body>
+</html>
