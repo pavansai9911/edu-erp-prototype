@@ -1,0 +1,709 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="violet" data-mode="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<title>EduERP · Staff</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Sora:wght@600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../shared/tokens.css">
+<link rel="stylesheet" href="../shared/styles.css">
+</head>
+<body>
+<div class="viewport">
+  <div class="proto-banner" onclick="App.roleSwitcher()">◆ STAFF PROTOTYPE · tap to switch role (review)</div>
+  <div id="app"></div>
+</div>
+
+<script src="../shared/data.js"></script>
+<script src="../shared/auth.js"></script>
+<script src="../shared/utils.js"></script>
+<script src="../shared/founder-data.js"></script>
+<script src="../shared/staff-data.js"></script>
+<script>
+/* ============================================================================
+   STAFF APP — one app, four roles, navigation COMPUTED FROM PERMISSIONS.
+   The RENEWAL surface: speed, minimal friction. No "if role" — only "if can(perm)".
+   ============================================================================ */
+const App = {
+  route:'dashboard', ctx:{},
+  systemDark:window.matchMedia('(prefers-color-scheme:dark)').matches,
+  loadingMs:500,
+  S:StaffDB, F:FounderDB,
+
+  init(){
+    const set=this.F.settings();
+    this.applyTheme(set.theme||'violet', set.mode||'system');
+    window.matchMedia('(prefers-color-scheme:dark)').addEventListener('change',e=>{this.systemDark=e.matches;const st=this.F.settings();if((st.mode||'system')==='system')this.applyTheme(st.theme,'system');});
+    this.render();
+  },
+  applyTheme(t,m){ document.documentElement.dataset.theme=t; document.documentElement.dataset.mode= m==='system'?(this.systemDark?'dark':'light'):m; },
+
+  /* ---- PERMISSION-COMPUTED NAVIGATION (the defining architecture) ---- */
+  computeTabs(){
+    const S=this.S, P=S.PERMS;
+    // every possible destination, each gated by a permission. Dashboard + More always present.
+    const all=[
+      {k:'dashboard',ic:'home',label:'Home',perm:null},
+      {k:'attendance',ic:'check',label:'Attendance',perm:P.ATTENDANCE_CREATE},
+      {k:'payments',ic:'wallet',label:'Payments',perm:P.FEE_PAYMENT_CREATE},
+      {k:'admissions',ic:'trend',label:'Admissions',perm:P.LEAD_VIEW},
+      {k:'approvals',ic:'inbox',label:'Approvals',perm:P.LEAVE_APPROVE},
+      {k:'students',ic:'users',label:'Students',perm:P.STUDENT_VIEW},
+      {k:'reports',ic:'chart',label:'Reports',perm:P.REPORTS_VIEW},
+    ];
+    let visible=all.filter(t=>!t.perm||S.can(t.perm));
+    // cap at 5 (incl. More). If more than 4 feature tabs + dashboard, overflow into More.
+    const maxPrimary=4; // + More = 5
+    let primary=visible.slice(0,maxPrimary);
+    let overflow=visible.slice(maxPrimary);
+    primary.push({k:'more',ic:'settings',label:'More',perm:null});
+    this._overflowTabs=overflow;
+    return primary;
+  },
+
+  render(){ document.getElementById('app').innerHTML=this.Shell(); this.mountScreen(); },
+  Shell(){
+    const tabs=this.computeTabs();
+    // if current route not in visible set (e.g. after role switch), redirect to dashboard
+    const routable=[...tabs,...(this._overflowTabs||[])].map(t=>t.k).concat(['more','student','lead','markAttendance','settings']);
+    if(!routable.includes(this.route)) this.route='dashboard';
+    const isSub=this.ctx.sub;
+    return `${this.AppBar()}
+      <div class="content fade-in" id="screen"></div>
+      ${isSub?'':`<div class="tabbar">${tabs.map(t=>this.tabBtn(t)).join('')}</div>`}`;
+  },
+  tabBtn(t){
+    let badge='';
+    if(t.k==='approvals'){ const n=this.S.pendingLeaves().length+this.S.pendingApplications().length; if(n)badge=`<span class="tab-badge">${n}</span>`; }
+    if(t.k==='admissions'){ const n=this.S.followUpsDue().length; if(n)badge=`<span class="tab-badge">${n}</span>`; }
+    return `<button class="tab ${this.route===t.k?'active':''}" onclick="App.go('${t.k}')">${icon(t.ic)}${badge}<span>${t.label}</span></button>`;
+  },
+  AppBar(){
+    if(this.ctx.sub){
+      return `<div class="appbar sub">
+        <button class="appbar-btn" onclick="App.back()" aria-label="Back">${icon('chevronL')}</button>
+        <div class="appbar-id"><div class="appbar-title">${this.ctx.title||''}</div>${this.ctx.subtitle?`<div class="appbar-sub">${this.ctx.subtitle}</div>`:''}</div>
+        ${this.ctx.action||''}
+      </div>`;
+    }
+    const p=this.S.profile(); const role=this.S.role();
+    const titles={dashboard:this.greeting(),attendance:'Attendance',payments:'Payments',admissions:'Admissions',approvals:'Approvals',students:'Students',reports:'Reports',more:'More'};
+    const sub={dashboard:role+' · '+this.F.settings().schoolName,attendance:'Mark & save',payments:'Record fees',admissions:'Leads & enquiries',approvals:'Needs your decision',students:'Student directory',reports:'Your reports',more:'Profile & settings'}[this.route];
+    return `<div class="appbar">
+      <div class="appbar-logo">${icon('building')}</div>
+      <div class="appbar-id"><div class="appbar-title">${titles[this.route]||''}</div><div class="appbar-sub">${icon('shield')} ${sub||role}</div></div>
+      <button class="appbar-btn" onclick="App.notImplemented('Notifications')" aria-label="Alerts">${icon('bell')}<span class="appbar-dot"></span></button>
+      <div class="appbar-avatar" style="background:${avatarColor(p.name)}" onclick="App.go('more')">${p.avatar}</div>
+    </div>`;
+  },
+  greeting(){ const h=new Date().getHours(); const g=h<12?'Good morning':h<17?'Good afternoon':'Good evening'; return g+', '+this.S.profile().name.split(' ')[0]; },
+
+  go(route,ctx={}){ this.route=route; this.ctx=ctx; this.render(); },
+  back(){ this.ctx={}; this.route=this._backTo||'dashboard'; this.render(); },
+  mountScreen(){
+    const el=document.getElementById('screen');
+    switch(this.route){
+      case 'dashboard': return this.Dashboard(el);
+      case 'attendance': return this.Attendance(el);
+      case 'markAttendance': return this.MarkAttendance(el);
+      case 'payments': return this.Payments(el);
+      case 'admissions': return this.Admissions(el);
+      case 'lead': return this.LeadDetail(el);
+      case 'approvals': return this.Approvals(el);
+      case 'students': return this.Students(el);
+      case 'student': return this.StudentDetail(el);
+      case 'reports': return this.Reports(el);
+      case 'more': return this.More(el);
+      case 'settings': return this.Settings(el);
+    }
+  },
+  withLoading(el,sk,build){ el.innerHTML=sk; setTimeout(()=>{ el.innerHTML=build(); if(this._after){this._after();this._after=null;} },this.loadingMs); },
+
+  /* ========================================================================
+     DASHBOARD — role-adaptive, permission-driven widgets. "What do I do now?"
+     ======================================================================== */
+  Dashboard(el){
+    this._backTo='dashboard';
+    const sk=`<div class="grid-2 mb-3">${'<div class="kpi"><div class="sk sk-line" style="width:60%"></div><div class="sk" style="height:22px;width:40%;margin-top:8px"></div></div>'.repeat(2)}</div><div class="card"><div class="sk" style="height:100px"></div></div>`;
+    this.withLoading(el,sk,()=>{
+      const S=this.S, P=S.PERMS;
+      let widgets='';
+      // Quick actions (permission-gated) — the 1-2 most common actions for THIS user
+      const actions=[];
+      if(S.can(P.ATTENDANCE_CREATE)) actions.push(`<button class="btn btn-primary btn-full" onclick="App.go('attendance')">${icon('check')} Mark attendance</button>`);
+      if(S.can(P.FEE_PAYMENT_CREATE)) actions.push(`<button class="btn btn-primary btn-full" onclick="App.go('payments')">${icon('wallet')} Record payment</button>`);
+      if(S.can(P.LEAD_CREATE)) actions.push(`<button class="btn btn-primary btn-full" onclick="App.newLead()">${icon('plus')} New enquiry</button>`);
+      if(S.can(P.LEAVE_APPROVE)) actions.push(`<button class="btn btn-primary btn-full" onclick="App.go('approvals')">${icon('inbox')} Review approvals</button>`);
+
+      // Principal → attention inbox
+      if(S.can(P.LEAVE_APPROVE)){
+        const pl=S.pendingLeaves().length, pa=S.pendingApplications().length;
+        widgets+=`<div class="sec-head"><div class="sec-title">Needs your attention</div></div>
+        <div class="grid-2 mb-3">
+          ${this.dashKpi('inbox','Leave requests',pl,pl?'var(--viz-warning)':'var(--viz-positive)')}
+          ${this.dashKpi('trend','Applications',pa,pa?'var(--viz-warning)':'var(--viz-positive)')}
+        </div>
+        ${pl+pa===0?`<div class="card mb-4" style="text-align:center;color:var(--viz-positive)"><div class="mb-2">${icon('checkCircle')}</div>You're all caught up</div>`:`<button class="btn btn-secondary btn-full mb-4" onclick="App.go('approvals')">Open approvals inbox</button>`}`;
+      }
+      // Teacher → my sections + attendance status
+      if(S.can(P.ATTENDANCE_CREATE)){
+        const secs=S.mySections();
+        widgets+=`<div class="sec-head"><div class="sec-title">Today's attendance</div></div><div class="card card-pad-0 mb-4"><div class="list">
+          ${secs.map(sec=>{ const done=!!S.getAttendance(sec); return `<div class="row" onclick="App.openMarkAttendance('${sec}')">
+            <div class="avatar avatar-sq" style="background:${done?'var(--success-subtle)':'var(--warning-subtle)'};color:${done?'var(--success)':'var(--warning)'}">${icon(done?'check':'calendar')}</div>
+            <div class="row-main"><div class="row-title">Section ${sec}</div><div class="row-sub">${S.sectionRoster(sec).length} students · ${done?'Marked today':'Not marked yet'}</div></div>
+            <span class="chip ${done?'chip-success':'chip-warning'}">${done?'Done':'Pending'}</span></div>`; }).join('')}
+        </div></div>`;
+      }
+      // Accountant → today collection + pending
+      if(S.can(P.FEE_PAYMENT_CREATE)){
+        const today=S.todayCollection(); const fs=this.F.feeSummary();
+        widgets+=`<div class="sec-head"><div class="sec-title">Collections</div></div>
+        <div class="grid-2 mb-4">
+          ${this.dashKpi('wallet','Collected today',fmt.moneyShort(today),'var(--viz-positive)')}
+          ${this.dashKpi('alert','Pending invoices',fs.partial+fs.unpaid,'var(--viz-negative)')}
+        </div>`;
+      }
+      // Receptionist → new leads + follow-ups
+      if(S.can(P.LEAD_VIEW) && !S.can(P.LEAVE_APPROVE)){
+        const f=S.funnel(); const due=S.followUpsDue().length;
+        widgets+=`<div class="sec-head"><div class="sec-title">Admissions today</div></div>
+        <div class="grid-2 mb-3">
+          ${this.dashKpi('trend','Active leads',S.leads().length,'var(--brand)')}
+          ${this.dashKpi('bell','Follow-ups due',due,due?'var(--viz-warning)':'var(--viz-positive)')}
+        </div>
+        <button class="btn btn-secondary btn-full mb-4" onclick="App.go('admissions')">View pipeline</button>`;
+      }
+
+      const actionsBlock = actions.length?`<div class="flex col gap-2 mb-4">${actions.slice(0,2).join('')}</div>`:'';
+      return actionsBlock + widgets + `<div class="dashed-card">${icon('shield')} <span class="t-caption">You see only what your role permits. Switch roles via the banner to compare.</span></div>`;
+    });
+  },
+  dashKpi(ic,label,value,color){
+    return `<div class="kpi"><div class="flex items-center gap-2 mb-1"><span style="color:${color};display:grid">${icon(ic)}</span><span class="kpi-label" style="margin:0">${label}</span></div><div class="kpi-value" style="font-size:22px">${value}</div></div>`;
+  },
+
+  /* ========================================================================
+     ATTENDANCE (Teacher) — the most-optimized screen. Default-present.
+     ======================================================================== */
+  Attendance(el){
+    this._backTo='dashboard';
+    if(!this.S.can(this.S.PERMS.ATTENDANCE_CREATE)) return this.noPermission(el);
+    const secs=this.S.mySections();
+    if(secs.length===0){ el.innerHTML=`<div class="state"><div class="state-ill">${icon('users')}</div><div class="state-title">No section assigned</div><div class="state-msg">You don't have a section assigned yet. Ask your Principal to assign one.</div></div>`; return; }
+    if(secs.length===1){ this.openMarkAttendance(secs[0]); return; }
+    el.innerHTML=`<p class="text-secondary mb-3">Choose a section to mark attendance.</p>
+      <div class="card card-pad-0"><div class="list">${secs.map(sec=>{ const done=!!this.S.getAttendance(sec); return `<div class="row" onclick="App.openMarkAttendance('${sec}')">
+        <div class="avatar avatar-sq" style="background:var(--brand-subtle);color:var(--brand)">${icon('users')}</div>
+        <div class="row-main"><div class="row-title">Section ${sec}</div><div class="row-sub">${this.S.sectionRoster(sec).length} students</div></div>
+        <span class="chip ${done?'chip-success':'chip-warning'}">${done?'Marked':'Pending'}</span>
+        <span class="row-chev">${icon('chevronR')}</span></div>`; }).join('')}</div></div>`;
+  },
+  openMarkAttendance(section){ this.go('markAttendance',{sub:true,section,title:'Section '+section,subtitle:'Tap a student to mark absent'}); },
+  MarkAttendance(el){
+    this._backTo='attendance';
+    const section=this.ctx.section;
+    const roster=this.S.sectionRoster(section);
+    const existing=this.S.getAttendance(section);
+    this._attExisting=!!existing;
+    // default: all present (existing marks if already saved)
+    this._marks={}; roster.forEach(s=>{ this._marks[s.id]= existing? (existing.marks[s.id]||'P') : 'P'; });
+    this.ctx.title='Section '+section;
+    this.ctx.subtitle=existing?'Editing today\u2019s attendance':'Tap a student to mark absent';
+    document.querySelector('.appbar')?.remove(); document.getElementById('app').insertAdjacentHTML('afterbegin',this.AppBar());
+    this._renderRoster(el,section,roster,existing);
+  },
+  _renderRoster(el,section,roster,existing){
+    const counts=this._attCounts();
+    const savedTime = existing ? fmt.ago(existing.savedAt) : '';
+    el.innerHTML=`
+      ${existing?`<div class="card mb-3" style="background:var(--info-subtle);border-color:transparent;display:flex;align-items:center;gap:10px">
+        <span style="color:var(--info);display:grid">${icon('checkCircle')}</span>
+        <div class="flex-1"><div class="t-label" style="font-weight:600;color:var(--info)">Already marked ${savedTime}</div><div class="t-caption">You're editing today's attendance. Changes overwrite the earlier save.</div></div>
+      </div>`:''}
+      <div class="card card-raised mb-3 flex between items-center" style="position:sticky;top:0;z-index:5">
+        <div class="flex gap-3">
+          <div><div class="t-data-lg" style="color:var(--viz-positive)">${counts.P}</div><div class="t-caption">Present</div></div>
+          <div><div class="t-data-lg" style="color:var(--viz-negative)">${counts.A}</div><div class="t-caption">Absent</div></div>
+          <div><div class="t-data-lg" style="color:var(--viz-warning)">${counts.L}</div><div class="t-caption">Leave</div></div>
+        </div>
+        <div class="t-caption">${roster.length} total</div>
+      </div>
+      <p class="t-caption mb-3">Everyone's marked present by default — just tap the ones who aren't. Tap cycles Present → Absent → Leave.</p>
+      <div class="card card-pad-0 mb-4"><div class="list" id="roster">
+        ${roster.map(s=>this._attRow(s)).join('')}
+      </div></div>
+      <div class="wiz-footer"><button class="btn btn-primary btn-full btn-lg" onclick="App.saveAttendance('${section}')">${icon('check')} ${existing?'Update attendance':'Save attendance'}</button></div>`;
+  },
+  _attRow(s){
+    const m=this._marks[s.id];
+    const cfg={P:['chip-success','P','Present'],A:['chip-danger','A','Absent'],L:['chip-warning','L','Leave']}[m];
+    return `<div class="row" onclick="App.cycleMark('${s.id}')" id="att-${s.id}">
+      <div class="avatar" style="background:${avatarColor(s.name)}">${initials(s.name)}</div>
+      <div class="row-main"><div class="row-title">${s.name}</div><div class="row-sub">Roll ${s.roll}</div></div>
+      <span class="chip ${cfg[0]}" style="min-width:74px;justify-content:center">${cfg[2]}</span>
+    </div>`;
+  },
+  _attCounts(){ const c={P:0,A:0,L:0}; Object.values(this._marks).forEach(m=>c[m]++); return c; },
+  cycleMark(id){
+    const order={P:'A',A:'L',L:'P'}; this._marks[id]=order[this._marks[id]];
+    // update just this row + counts (fast, no full re-render)
+    const s=this.F.studentById(id);
+    document.getElementById('att-'+id).outerHTML=this._attRow(s);
+    const c=this._attCounts();
+    const head=document.querySelector('.card-raised');
+    if(head) head.querySelectorAll('.t-data-lg').forEach((n,i)=>n.textContent=[c.P,c.A,c.L][i]);
+  },
+  saveAttendance(section){
+    this.S.saveAttendance(section,{...this._marks});
+    const c=this._attCounts();
+    UI.toast(`Attendance saved · ${c.P} present, ${c.A} absent`);
+    this.go('dashboard');
+  },
+
+  /* ========================================================================
+     PAYMENTS (Accountant) — find student → itemized dues → record → receipt
+     ======================================================================== */
+  Payments(el){
+    this._backTo='dashboard';
+    if(!this.S.can(this.S.PERMS.FEE_PAYMENT_CREATE)) return this.noPermission(el);
+    this._paySearch=this._paySearch||'';
+    const sk=`<div class="sk" style="height:48px;margin-bottom:16px"></div>${'<div class="sk-row"><div class="sk sk-circle"></div><div style="flex:1"><div class="sk sk-line" style="width:60%"></div><div class="sk sk-line" style="width:40%"></div></div></div>'.repeat(5)}`;
+    this.withLoading(el,sk,()=>this.paymentsMarkup());
+  },
+  paymentsMarkup(){
+    const q=(this._paySearch||'').toLowerCase();
+    let list=this.F.students().map(s=>({s,inv:this.F.invoiceForStudent(s.id)})).filter(x=>x.inv);
+    if(q) list=list.filter(x=>x.s.name.toLowerCase().includes(q)||x.s.roll===q||x.s.admissionNo.toLowerCase().includes(q));
+    // sort: those with dues first
+    list.sort((a,b)=>(b.inv.total-b.inv.paid)-(a.inv.total-a.inv.paid));
+    return `<div class="input-affix mb-3"><span style="position:absolute;left:14px;color:var(--text-tertiary);display:grid">${icon('search')}</span>
+      <input class="input" style="padding-left:42px" placeholder="Search name, roll, admission no…" value="${this._paySearch||''}" oninput="App.searchPay(this.value)"></div>
+      ${list.length===0?`<div class="state" style="min-height:36vh"><div class="state-ill">${icon('search')}</div><div class="state-title">No students found</div></div>`
+      :`<div class="card card-pad-0"><div class="list">${list.slice(0,40).map(({s,inv})=>{
+        const due=inv.total-inv.paid;
+        return `<div class="row" onclick="App.openStudentFee('${s.id}')">
+          <div class="avatar" style="background:${avatarColor(s.name)}">${initials(s.name)}</div>
+          <div class="row-main"><div class="row-title">${s.name}</div><div class="row-sub">${s.section} · Roll ${s.roll}</div></div>
+          <div class="row-trail">${due>0?`<span class="t-data" style="font-weight:700;color:var(--viz-negative)">${fmt.money(due)}</span><span class="t-caption">due</span>`:`<span class="chip chip-success">Paid</span>`}</div>
+          <span class="row-chev">${icon('chevronR')}</span></div>`; }).join('')}</div></div>`}`;
+  },
+  searchPay(v){ this._paySearch=v; const el=document.getElementById('screen'); const sc=el.scrollTop; el.innerHTML=this.paymentsMarkup(); el.scrollTop=sc; const i=el.querySelector('input'); if(i){i.focus();i.setSelectionRange(v.length,v.length);} },
+  openStudentFee(id){
+    const s=this.F.studentById(id); const inv=this.F.invoiceForStudent(id);
+    this.go('student',{sub:true,id,title:s.name,subtitle:s.section+' · fee account',payMode:true});
+  },
+
+  /* student fee view for payment (also used by SIS) */
+  StudentDetail(el){
+    const s=this.F.studentById(this.ctx.id); if(!s){ el.innerHTML='<div class="state"><div class="state-title">Not found</div></div>'; return; }
+    this._backTo = this.ctx.payMode?'payments':'students';
+    this.ctx.title=s.name; this.ctx.subtitle=`${s.section} · ${s.admissionNo}`;
+    document.querySelector('.appbar')?.remove(); document.getElementById('app').insertAdjacentHTML('afterbegin',this.AppBar());
+    const inv=this.F.invoiceForStudent(s.id); const pays=this.F.paymentsForStudent(s.id); const due=inv.total-inv.paid;
+    const canPay=this.S.can(this.S.PERMS.FEE_PAYMENT_CREATE);
+    // tabs depend on permission (SIS shows profile/attendance/fees; accountant lands on fees)
+    const showFees=this.S.can(this.S.PERMS.FEE_VIEW)||this.S.can(this.S.PERMS.FEE_PAYMENT_CREATE)||this.ctx.payMode;
+    el.innerHTML=`
+      <div class="card card-raised mb-4 flex gap-3 items-center">
+        <div class="avatar" style="width:52px;height:52px;font-size:16px;background:${avatarColor(s.name)}">${initials(s.name)}</div>
+        <div class="flex-1"><div class="t-h3">${s.name}</div><div class="row-sub">${s.section} · Roll ${s.roll} · ${s.gender}</div></div>
+      </div>
+      ${showFees?`
+      <div class="card mb-3">
+        <div class="flex between items-center mb-3"><span class="t-h3">Fee account</span><span class="chip ${inv.status==='Paid'?'chip-success':inv.status==='Partial'?'chip-warning':'chip-danger'}">${inv.status}</span></div>
+        <div class="dl">${inv.items.map(it=>`<div class="dl-row"><span class="dl-key">${it.type}</span><span class="dl-val t-data">${fmt.money(it.amount)}</span></div>`).join('')}
+          <div class="dl-row" style="border-top:2px solid var(--border-strong)"><span class="dl-key" style="font-weight:700;color:var(--text-primary)">Total billed</span><span class="dl-val t-data">${fmt.money(inv.total)}</span></div>
+          <div class="dl-row"><span class="dl-key">Paid</span><span class="dl-val t-data" style="color:var(--viz-positive)">${fmt.money(inv.paid)}</span></div>
+          ${due>0?`<div class="dl-row"><span class="dl-key" style="font-weight:700">Outstanding</span><span class="dl-val t-data" style="color:var(--viz-negative);font-weight:700">${fmt.money(due)}</span></div>`:''}
+        </div>
+      </div>
+      ${s.concession>0?`<div class="dashed-card mb-3" style="border-color:var(--viz-positive);color:var(--viz-positive)">${icon('check')} ${Math.round(s.concession*100)}% concession on tuition</div>`:''}
+      ${canPay&&due>0?`<button class="btn btn-primary btn-full btn-lg mb-4" onclick="App.openPaymentSheet('${s.id}')">${icon('wallet')} Record payment</button>`:''}
+      ${canPay&&due===0?`<div class="dashed-card mb-4" style="border-color:var(--viz-positive);color:var(--viz-positive)">${icon('checkCircle')} No dues — fully paid</div>`:''}
+      ${pays.length?`<div class="sec-head"><div class="sec-title">Payment history</div></div><div class="card card-pad-0"><div class="list">${pays.map(p=>`<div class="row" style="cursor:default"><div class="avatar avatar-sq" style="background:var(--success-subtle);color:var(--success)">${icon('wallet')}</div><div class="row-main"><div class="row-title">${fmt.money(p.amount)}</div><div class="row-sub">${p.mode} · ${fmt.date(p.at)} · ${p.id}</div></div></div>`).join('')}</div></div>`:''}
+      `:`
+      <div class="card"><div class="dl">
+        <div class="dl-row"><span class="dl-key">Admission no.</span><span class="dl-val t-code">${s.admissionNo}</span></div>
+        <div class="dl-row"><span class="dl-key">Section</span><span class="dl-val">${s.section}</span></div>
+        <div class="dl-row"><span class="dl-key">Guardian</span><span class="dl-val">${s.guardian.name}</span></div>
+        <div class="dl-row"><span class="dl-key">Phone</span><span class="dl-val">${s.guardian.phone}</span></div>
+      </div></div>`}`;
+  },
+  openPaymentSheet(id){
+    const s=this.F.studentById(id); const inv=this.F.invoiceForStudent(id); const due=inv.total-inv.paid;
+    this._payAmount=due; this._payMode='Cash';
+    const {close}=UI.sheet(`
+      <div class="sheet-title">Record payment</div>
+      <div class="flex gap-2 items-center mb-4"><div class="avatar" style="background:${avatarColor(s.name)}">${initials(s.name)}</div><div><div class="row-title">${s.name}</div><div class="row-sub">${fmt.money(due)} outstanding</div></div></div>
+      <div class="field"><label class="field-label">Amount</label>
+        <div class="input-affix"><span class="prefix">₹</span><input class="input" id="pay-amt" type="number" value="${due}" inputmode="numeric"></div>
+        <div class="field-hint">Defaults to full due. Edit for a partial payment.</div>
+      </div>
+      <div class="field"><label class="field-label">Payment mode</label>
+        <div class="segmented" id="pay-mode">${['Cash','UPI','Cheque'].map(m=>`<button class="${m==='Cash'?'active':''}" onclick="App.setPayMode('${m}')">${m}</button>`).join('')}</div>
+      </div>
+      <div id="pay-warn"></div>
+      <button class="btn btn-primary btn-full btn-lg mt-2" onclick="App.confirmPayment('${id}',${due})">${icon('check')} Confirm & generate receipt</button>
+    `);
+    this._payClose=close;
+  },
+  setPayMode(m){ this._payMode=m; document.querySelectorAll('#pay-mode button').forEach(b=>b.classList.toggle('active',b.textContent===m)); },
+  confirmPayment(id,due){
+    const amt=Number(document.getElementById('pay-amt').value);
+    const warn=document.getElementById('pay-warn');
+    if(!amt||amt<=0){ warn.innerHTML=`<div class="field-error mb-2">${icon('alert')} Enter a valid amount.</div>`; return; }
+    if(amt>due){ // overpay guardrail — never silent
+      warn.innerHTML=`<div class="field-error mb-2">${icon('alert')} ₹${amt} exceeds the ₹${due} due. Reduce the amount.</div>`; return;
+    }
+    // wrong-student guardrail — confirm WHO and HOW MUCH before money moves (busy desk reality)
+    const s=this.F.studentById(id);
+    UI.confirm({
+      title:'Confirm this payment',
+      message:`Record ${fmt.money(amt)} by ${this._payMode} for ${s.name} (${s.section}, Roll ${s.roll})? This generates a receipt.`,
+      confirmText:'Yes, record it'
+    }).then(ok=>{ if(ok) this._applyPayment(id,amt); });
+  },
+  _applyPayment(id,amt){
+    const inv=this.F.invoiceForStudent(id);
+    const invs=this.F._allInvoices(); const target=invs.find(i=>i.id===inv.id);
+    target.paid+=amt; target.status= target.paid>=target.total?'Paid':target.paid>0?'Partial':'Unpaid';
+    this.F._set(this.F.COLS.INVOICES,invs);
+    const pays=this.F._allPayments();
+    const rcp={id:'RCP-'+String(Date.now()).slice(-5),invoiceId:inv.id,studentId:id,studentName:this.F.studentById(id).name,branchId:this.F.studentById(id).branchId,amount:amt,mode:this._payMode,at:new Date().toISOString(),items:inv.items.map(x=>x.type)};
+    pays.push(rcp); this.F._set(this.F.COLS.PAYMENTS,pays);
+    this._payClose&&this._payClose();
+    this.showReceipt(rcp);
+  },
+  showReceipt(rcp){
+    const s=this.F.studentById(rcp.studentId); const inv=this.F.invoiceForStudent(rcp.studentId); const due=inv.total-inv.paid;
+    const {close}=UI.sheet(`
+      <div style="text-align:center;margin-bottom:16px"><div class="modal-icon success" style="margin:0 auto 12px">${icon('checkCircle')}</div>
+      <div class="t-h2">Payment recorded</div><div class="row-sub">${fmt.money(rcp.amount)} · ${rcp.mode}</div></div>
+      <div class="card mb-4" style="border-style:dashed">
+        <div class="text-center mb-3"><div class="t-h3">${this.F.settings().schoolName}</div><div class="t-caption">Fee Receipt · ${rcp.id}</div></div>
+        <div class="dl">
+          <div class="dl-row"><span class="dl-key">Student</span><span class="dl-val">${s.name}</span></div>
+          <div class="dl-row"><span class="dl-key">Section</span><span class="dl-val">${s.section}</span></div>
+          <div class="dl-row"><span class="dl-key">Amount paid</span><span class="dl-val t-data">${fmt.money(rcp.amount)}</span></div>
+          <div class="dl-row"><span class="dl-key">Mode</span><span class="dl-val">${rcp.mode}</span></div>
+          <div class="dl-row"><span class="dl-key">Date</span><span class="dl-val">${fmt.date(rcp.at)}</span></div>
+          <div class="dl-row"><span class="dl-key">Balance due</span><span class="dl-val t-data" style="color:${due>0?'var(--viz-negative)':'var(--viz-positive)'}">${fmt.money(due)}</span></div>
+        </div>
+      </div>
+      <div class="flex gap-3"><button class="btn btn-secondary btn-full" onclick="App.notImplemented('Share receipt')">${icon('mail')} Share</button>
+      <button class="btn btn-primary btn-full" onclick="App._receiptDone()">Done</button></div>
+    `);
+    this._receiptClose=close;
+  },
+  _receiptDone(){ this._receiptClose&&this._receiptClose(); this.go('payments'); UI.toast('Receipt saved'); },
+
+  /* ========================================================================
+     ADMISSIONS (Receptionist) — funnel + leads + capture
+     ======================================================================== */
+  Admissions(el){
+    this._backTo='dashboard';
+    if(!this.S.can(this.S.PERMS.LEAD_VIEW)) return this.noPermission(el);
+    this._leadFilter=this._leadFilter||'all';
+    const sk=`<div class="sk" style="height:90px;border-radius:14px;margin-bottom:16px"></div>${'<div class="sk-row"><div class="sk sk-circle"></div><div style="flex:1"><div class="sk sk-line" style="width:55%"></div><div class="sk sk-line" style="width:35%"></div></div></div>'.repeat(5)}`;
+    this.withLoading(el,sk,()=>this.admissionsMarkup());
+  },
+  admissionsMarkup(){
+    const leads=this.S.leads();
+    if(leads.length===0) return `<div class="state"><div class="state-ill">${icon('trend')}</div><div class="state-title">No leads yet</div><div class="state-msg">Capture your first enquiry — it takes about 20 seconds.</div><button class="btn btn-primary btn-lg mt-2" onclick="App.newLead()">${icon('plus')} New enquiry</button></div>`;
+    const funnel=this.S.funnel(); const max=Math.max(...funnel.map(f=>f.count),1);
+    const stages=['all','Enquiry','Contacted','Visited','Applied','Admitted'];
+    const f=this._leadFilter;
+    let list = f==='all'?leads:leads.filter(l=>l.stage===f);
+    return `
+      <div class="card card-raised mb-4"><div class="sec-title mb-3">Admissions funnel</div>
+        ${funnel.map(x=>`<div class="mb-2"><div class="flex between mb-1"><span class="t-label">${x.stage}</span><span class="t-data" style="font-weight:700">${x.count}</span></div>
+        <div style="height:8px;background:var(--surface-sunken);border-radius:99px;overflow:hidden"><div style="width:${(x.count/max)*100}%;height:100%;background:var(--brand);border-radius:99px"></div></div></div>`).join('')}
+      </div>
+      <div class="filter-row">${stages.map(s=>`<button class="filter-chip ${f===s?'active':''}" onclick="App.filterLeads('${s}')">${s==='all'?'All':s}</button>`).join('')}</div>
+      ${list.length===0?`<div class="dashed-card">No leads in this stage</div>`:`<div class="card card-pad-0"><div class="list">${list.map(l=>this.leadRow(l)).join('')}</div></div>`}
+      <button class="fab" onclick="App.newLead()" aria-label="New enquiry">${icon('plus')}</button>`;
+  },
+  leadRow(l){
+    const due=l.followUp && l.followUp<=new Date().toISOString().split('T')[0];
+    const stageChip={Enquiry:'chip-neutral',Contacted:'chip-info',Visited:'chip-warning',Applied:'chip-brand',Admitted:'chip-success'}[l.stage];
+    return `<div class="row" onclick="App.openLead('${l.id}')">
+      <div class="avatar" style="background:${avatarColor(l.childName)}">${initials(l.childName)}</div>
+      <div class="row-main"><div class="row-title">${l.childName}</div><div class="row-sub">${l.classInterested} · ${l.source}${due?' · <span style="color:var(--viz-warning)">follow up</span>':''}</div></div>
+      <span class="chip ${stageChip}">${l.stage}</span>
+      <span class="row-chev">${icon('chevronR')}</span></div>`;
+  },
+  filterLeads(s){ this._leadFilter=s; document.getElementById('screen').innerHTML=this.admissionsMarkup(); },
+  newLead(){
+    this._dupeAck=false;
+    const {close}=UI.sheet(`
+      <div class="sheet-title">New enquiry</div>
+      <div class="field"><label class="field-label">Child's name <span class="req">*</span></label><input class="input" id="nl-child" placeholder="Full name"></div>
+      <div class="field"><label class="field-label">Parent's name <span class="req">*</span></label><input class="input" id="nl-parent" placeholder="Parent / guardian"></div>
+      <div class="field"><label class="field-label">Phone <span class="req">*</span></label><input class="input" id="nl-phone" type="tel" inputmode="tel" placeholder="+91 …"></div>
+      <div class="field"><label class="field-label">Class interested</label>
+        <select class="select" id="nl-class">${['Nursery','LKG','UKG','Class 1','Class 2','Class 3'].map(c=>`<option>${c}</option>`).join('')}</select></div>
+      <div class="field"><label class="field-label">Source</label>
+        <select class="select" id="nl-source">${['Walk-in','Phone','Referral','Website','Social media'].map(c=>`<option>${c}</option>`).join('')}</select></div>
+      <div id="nl-err"></div>
+      <button class="btn btn-primary btn-full btn-lg mt-2" onclick="App.saveLead()">${icon('check')} Capture lead</button>
+    `);
+    this._leadClose=close;
+  },
+  saveLead(){
+    const g=id=>document.getElementById(id).value.trim();
+    const child=g('nl-child'), parent=g('nl-parent'), phone=g('nl-phone');
+    if(!child||!parent||!phone){ document.getElementById('nl-err').innerHTML=`<div class="field-error mb-2">${icon('alert')} Name, parent and phone are required.</div>`; return; }
+    // soft duplicate check — same phone already in the pipeline (parent enquired twice)
+    const digits=phone.replace(/\D/g,'').slice(-10);
+    const dupe=this.S.leads().find(l=>l.phone.replace(/\D/g,'').slice(-10)===digits && digits.length>=10);
+    if(dupe && !this._dupeAck){
+      document.getElementById('nl-err').innerHTML=`<div class="field-error mb-2">${icon('alert')} A lead with this phone already exists: <b>${dupe.childName}</b> (${dupe.stage}). Tap Capture again to add anyway.</div>`;
+      this._dupeAck=true; return;
+    }
+    this._dupeAck=false;
+    this.S.addLead({childName:child,parentName:parent,phone,classInterested:g('nl-class'),source:g('nl-source')});
+    this._leadClose&&this._leadClose();
+    if(this.route!=='admissions') this.go('admissions'); else document.getElementById('screen').innerHTML=this.admissionsMarkup();
+    UI.toast('Lead captured');
+  },
+  openLead(id){ this.go('lead',{sub:true,id,title:'Lead',_back:'admissions'}); },
+  LeadDetail(el){
+    const l=this.S.leadById(this.ctx.id); if(!l){ el.innerHTML='<div class="state"><div class="state-title">Not found</div></div>'; return; }
+    this._backTo='admissions';
+    this.ctx.title=l.childName; this.ctx.subtitle=l.classInterested+' · '+l.stage;
+    document.querySelector('.appbar')?.remove(); document.getElementById('app').insertAdjacentHTML('afterbegin',this.AppBar());
+    const stages=['Enquiry','Contacted','Visited','Applied','Admitted']; const idx=stages.indexOf(l.stage);
+    const canApprove=this.S.can(this.S.PERMS.APPLICATION_APPROVE);
+    el.innerHTML=`
+      <div class="card mb-4"><div class="dl">
+        <div class="dl-row"><span class="dl-key">Parent</span><span class="dl-val">${l.parentName}</span></div>
+        <div class="dl-row"><span class="dl-key">Phone</span><span class="dl-val">${l.phone}</span></div>
+        <div class="dl-row"><span class="dl-key">Class</span><span class="dl-val">${l.classInterested}</span></div>
+        <div class="dl-row"><span class="dl-key">Source</span><span class="dl-val">${l.source}</span></div>
+        <div class="dl-row"><span class="dl-key">Captured</span><span class="dl-val">${fmt.ago(l.createdAt)}</span></div>
+      </div></div>
+      <div class="sec-head"><div class="sec-title">Stage</div></div>
+      <div class="card mb-4">
+        <div class="flex gap-2" style="flex-wrap:wrap">${stages.map((st,i)=>`<span class="chip ${i<=idx?'chip-brand':'chip-neutral'}">${st}</span>`).join('')}</div>
+        ${idx<stages.length-1?`<button class="btn btn-primary btn-full mt-4" onclick="App.advanceLead('${l.id}','${stages[idx+1]}')">${icon('trend')} Move to ${stages[idx+1]}</button>`:`<div class="dashed-card mt-4" style="border-color:var(--viz-positive);color:var(--viz-positive)">${icon('checkCircle')} Admitted</div>`}
+      </div>
+      <button class="btn btn-secondary btn-full mb-3" onclick="App.addLeadNote('${l.id}')">${icon('edit')} Add note / follow-up</button>
+      ${l.stage==='Applied'&&canApprove?`<button class="btn btn-primary btn-full" onclick="App.go('approvals')">${icon('inbox')} Review application in Approvals</button>`:''}
+      ${l.stage==='Applied'&&!canApprove?`<div class="dashed-card">${icon('shield')} <span class="t-caption">Only the Principal can approve applications.</span></div>`:''}
+      ${l.notes.length?`<div class="sec-head"><div class="sec-title">Notes</div></div><div class="card card-pad-0"><div class="list">${l.notes.map(n=>`<div class="row" style="cursor:default"><div class="row-main"><div class="row-title" style="font-weight:400">${n.text}</div><div class="row-sub">${fmt.ago(n.at)}</div></div></div>`).join('')}</div></div>`:''}
+    `;
+  },
+  advanceLead(id,stage){ this.S.moveLeadStage(id,stage); this.LeadDetail(document.getElementById('screen')); UI.toast('Moved to '+stage); },
+  addLeadNote(id){
+    const {close}=UI.sheet(`<div class="sheet-title">Add note</div>
+      <div class="field"><textarea class="textarea" id="ln-note" placeholder="Follow-up notes, call summary…"></textarea></div>
+      <button class="btn btn-primary btn-full" onclick="App.saveLeadNote('${id}')">Save note</button>`);
+    this._noteClose=close;
+  },
+  saveLeadNote(id){ const t=document.getElementById('ln-note').value.trim(); if(t){ this.S.addLeadNote(id,t); } this._noteClose&&this._noteClose(); this.LeadDetail(document.getElementById('screen')); if(t)UI.toast('Note added'); },
+
+  /* ========================================================================
+     APPROVALS (Principal) — the attention inbox
+     ======================================================================== */
+  Approvals(el){
+    this._backTo='dashboard';
+    if(!this.S.can(this.S.PERMS.LEAVE_APPROVE)) return this.noPermission(el);
+    const sk=`${'<div class="card mb-3"><div class="sk-row"><div class="sk sk-circle"></div><div style="flex:1"><div class="sk sk-line" style="width:50%"></div><div class="sk sk-line" style="width:70%"></div></div></div></div>'.repeat(3)}`;
+    this.withLoading(el,sk,()=>{
+      const leaves=this.S.pendingLeaves(); const apps=this.S.pendingApplications();
+      if(leaves.length+apps.length===0){
+        return `<div class="state"><div class="state-ill pos">${icon('checkCircle')}</div><div class="state-title">You're all caught up</div><div class="state-msg">Nothing needs your attention right now. New leave requests and applications will appear here.</div></div>`;
+      }
+      let html='';
+      if(apps.length){ html+=`<div class="sec-head"><div class="sec-title">Admission applications</div><span class="chip chip-warning">${apps.length}</span></div>`;
+        html+=apps.map(a=>`<div class="card mb-3">
+          <div class="flex gap-3 items-center mb-3"><div class="avatar" style="background:${avatarColor(a.childName)}">${initials(a.childName)}</div>
+          <div class="flex-1"><div class="row-title">${a.childName}</div><div class="row-sub">${a.classApplied} · ${a.parentName}</div></div></div>
+          <div class="flex gap-2"><button class="btn btn-danger-soft btn-full btn-sm" onclick="App.decideApp('${a.id}','Rejected')">Reject</button>
+          <button class="btn btn-secondary btn-full btn-sm" onclick="App.decideApp('${a.id}','Waitlisted')">Waitlist</button>
+          <button class="btn btn-primary btn-full btn-sm" onclick="App.decideApp('${a.id}','Admitted')">Admit</button></div>
+        </div>`).join('');
+      }
+      if(leaves.length){ html+=`<div class="sec-head"><div class="sec-title">Leave requests</div><span class="chip chip-warning">${leaves.length}</span></div>`;
+        html+=leaves.map(l=>`<div class="card mb-3">
+          <div class="flex gap-3 items-center mb-2"><div class="avatar" style="background:${avatarColor(l.staffName)}">${initials(l.staffName)}</div>
+          <div class="flex-1"><div class="row-title">${l.staffName}</div><div class="row-sub">${l.staffRole} · ${l.type} leave</div></div>
+          <span class="chip chip-neutral">${l.days}d</span></div>
+          <div class="dl mb-3"><div class="dl-row"><span class="dl-key">Dates</span><span class="dl-val">${fmt.date(l.from)} – ${fmt.date(l.to)}</span></div>
+          <div class="dl-row"><span class="dl-key">Reason</span><span class="dl-val">${l.reason}</span></div></div>
+          <div class="flex gap-2"><button class="btn btn-danger-soft btn-full btn-sm" onclick="App.decideLeave('${l.id}','Rejected')">Reject</button>
+          <button class="btn btn-primary btn-full btn-sm" onclick="App.decideLeave('${l.id}','Approved')">Approve</button></div>
+        </div>`).join('');
+      }
+      return html;
+    });
+  },
+  decideLeave(id,status){ this.S.decideLeave(id,status); UI.toast('Leave '+status.toLowerCase()); this.Approvals(document.getElementById('screen')); this._refreshBadges(); },
+  decideApp(id,status){ this.S.decideApplication(id,status); UI.toast('Application '+status.toLowerCase()); this.Approvals(document.getElementById('screen')); this._refreshBadges(); },
+  _refreshBadges(){ const tb=document.querySelector('.tabbar'); if(tb){ const tabs=this.computeTabs(); tb.innerHTML=tabs.map(t=>this.tabBtn(t)).join(''); } },
+
+  /* ========================================================================
+     STUDENTS (SIS) — permission-gated directory
+     ======================================================================== */
+  Students(el){
+    this._backTo='dashboard';
+    if(!this.S.can(this.S.PERMS.STUDENT_VIEW)) return this.noPermission(el);
+    this._stuSearch=this._stuSearch||''; this._stuFilter=this._stuFilter||'all';
+    const sk=`<div class="sk" style="height:48px;margin-bottom:16px"></div>${'<div class="sk-row"><div class="sk sk-circle"></div><div style="flex:1"><div class="sk sk-line" style="width:60%"></div><div class="sk sk-line" style="width:40%"></div></div></div>'.repeat(6)}`;
+    this.withLoading(el,sk,()=>this.studentsMarkup());
+  },
+  studentsMarkup(){
+    const all=this.F.students();
+    const q=(this._stuSearch||'').toLowerCase(); const f=this._stuFilter;
+    const sections=[...new Set(all.map(s=>s.section))];
+    let list=all.filter(s=>{ const mq=!q||s.name.toLowerCase().includes(q)||s.section.toLowerCase().includes(q)||s.admissionNo.toLowerCase().includes(q); const mf=f==='all'||s.section===f; return mq&&mf; });
+    const canFee=this.S.can(this.S.PERMS.FEE_VIEW)||this.S.can(this.S.PERMS.FEE_PAYMENT_CREATE);
+    return `<div class="input-affix mb-3"><span style="position:absolute;left:14px;color:var(--text-tertiary);display:grid">${icon('search')}</span>
+      <input class="input" style="padding-left:42px" placeholder="Search name, section, admission…" value="${this._stuSearch||''}" oninput="App.searchStu(this.value)"></div>
+      <div class="filter-row"><button class="filter-chip ${f==='all'?'active':''}" onclick="App.filterStu('all')">All ${all.length}</button>
+        ${sections.map(sec=>`<button class="filter-chip ${f===sec?'active':''}" onclick="App.filterStu('${sec}')">${sec}</button>`).join('')}</div>
+      ${list.length===0?`<div class="state" style="min-height:36vh"><div class="state-ill">${icon('search')}</div><div class="state-title">No matches</div></div>`
+      :`<div class="card card-pad-0"><div class="list">${list.slice(0,50).map(s=>{ const inv=this.F.invoiceForStudent(s.id); const chip=inv.status==='Paid'?'chip-success':inv.status==='Partial'?'chip-warning':'chip-danger';
+        return `<div class="row" onclick="App.go('student',{sub:true,id:'${s.id}'})"><div class="avatar" style="background:${avatarColor(s.name)}">${initials(s.name)}</div>
+        <div class="row-main"><div class="row-title">${s.name}</div><div class="row-sub">${s.section} · Roll ${s.roll}</div></div>
+        ${canFee?`<span class="chip ${chip}">${inv.status}</span>`:''}<span class="row-chev">${icon('chevronR')}</span></div>`; }).join('')}</div></div><p class="t-caption text-center mt-3">${list.length} students</p>`}`;
+  },
+  searchStu(v){ this._stuSearch=v; const el=document.getElementById('screen'); const sc=el.scrollTop; el.innerHTML=this.studentsMarkup(); el.scrollTop=sc; const i=el.querySelector('input'); if(i){i.focus();i.setSelectionRange(v.length,v.length);} },
+  filterStu(f){ this._stuFilter=f; document.getElementById('screen').innerHTML=this.studentsMarkup(); },
+
+  /* ========================================================================
+     REPORTS (role-gated) — form follows data + permission
+     ======================================================================== */
+  Reports(el){
+    this._backTo='dashboard';
+    if(!this.S.can(this.S.PERMS.REPORTS_VIEW)) return this.noPermission(el);
+    const sk=`${'<div class="card mb-3"><div class="sk sk-line" style="width:40%"></div><div class="sk" style="height:80px;margin-top:12px"></div></div>'.repeat(2)}`;
+    this.withLoading(el,sk,()=>{
+      const canFee=this.S.can(this.S.PERMS.FEE_VIEW)||this.S.can(this.S.PERMS.FEE_PAYMENT_CREATE);
+      const isPrincipal=this.S.can(this.S.PERMS.LEAVE_APPROVE);
+      let html=`<p class="t-caption mb-4">${icon('shield')} Reports scoped to your role · real data only</p>`;
+      // Accountant → fee reports; Principal → attendance/admissions
+      if(canFee){
+        const byType=this.F.collectionByType(); const max=Math.max(...byType.map(t=>t.amount));
+        html+=`<div class="card mb-4"><div class="sec-title mb-1">Collection by item type</div><p class="t-caption mb-4">The flexible ledger — tuition vs add-ons.</p>
+          ${byType.map((t,i)=>`<div class="mb-3"><div class="flex between mb-1"><span class="t-label">${t.type}</span><span class="t-data" style="font-weight:700">${fmt.money(t.amount)}</span></div>
+          <div style="height:8px;background:var(--surface-sunken);border-radius:99px;overflow:hidden"><div style="width:${(t.amount/max)*100}%;height:100%;background:var(--viz-${(i%8)+1});border-radius:99px"></div></div></div>`).join('')}</div>`;
+        const fs=this.F.feeSummary();
+        html+=`<div class="card mb-4"><div class="sec-title mb-4">Outstanding summary</div><div class="flex gap-3">
+          <div class="flex-1 text-center" style="padding:14px;background:var(--success-subtle);border-radius:var(--r-md)"><div class="t-data-lg" style="color:var(--success)">${fs.paid}</div><div class="t-caption">Paid</div></div>
+          <div class="flex-1 text-center" style="padding:14px;background:var(--warning-subtle);border-radius:var(--r-md)"><div class="t-data-lg" style="color:var(--warning)">${fs.partial}</div><div class="t-caption">Partial</div></div>
+          <div class="flex-1 text-center" style="padding:14px;background:var(--danger-subtle);border-radius:var(--r-md)"><div class="t-data-lg" style="color:var(--danger)">${fs.unpaid}</div><div class="t-caption">Unpaid</div></div>
+        </div></div>`;
+      }
+      if(isPrincipal){
+        const secs={}; this.F.students().forEach(s=>{ secs[s.section]=(secs[s.section]||0)+1; });
+        const rows=Object.entries(secs).map(([sec,n])=>({sec,n,pct:85+(sec.charCodeAt(0)%13)}));
+        html+=`<div class="card mb-4"><div class="sec-title mb-4">Attendance by section</div>
+          ${rows.map(r=>`<div class="mb-3"><div class="flex between mb-1"><span class="t-label">${r.sec} <span class="t-caption">(${r.n})</span></span><span class="t-data" style="font-weight:700">${r.pct}%</span></div>
+          <div style="height:8px;background:var(--surface-sunken);border-radius:99px;overflow:hidden"><div style="width:${r.pct}%;height:100%;background:${r.pct>=90?'var(--viz-positive)':r.pct>=80?'var(--viz-warning)':'var(--viz-negative)'};border-radius:99px"></div></div></div>`).join('')}</div>`;
+        const funnel=this.S.funnel(); const fmax=Math.max(...funnel.map(f=>f.count),1);
+        html+=`<div class="card mb-4"><div class="sec-title mb-4">Admissions funnel</div>
+          ${funnel.map(x=>`<div class="mb-2"><div class="flex between mb-1"><span class="t-label">${x.stage}</span><span class="t-data" style="font-weight:700">${x.count}</span></div>
+          <div style="height:8px;background:var(--surface-sunken);border-radius:99px;overflow:hidden"><div style="width:${(x.count/fmax)*100}%;height:100%;background:var(--brand);border-radius:99px"></div></div></div>`).join('')}</div>`;
+      }
+      html+=`<button class="btn btn-secondary btn-full" onclick="App.notImplemented('Export')">${icon('chart')} Export as PDF</button>`;
+      return html;
+    });
+  },
+
+  /* ========================================================================
+     MORE — profile, my leave, theme, sign out
+     ======================================================================== */
+  More(el){
+    this._backTo='dashboard';
+    const p=this.S.profile(); const role=this.S.role(); const set=this.F.settings();
+    // overflow tabs (permission destinations that didn't fit in the bar) surface here
+    const overflow=this._overflowTabs||[];
+    el.innerHTML=`
+      <div class="card card-raised mb-4 flex gap-3 items-center">
+        <div class="avatar" style="width:52px;height:52px;font-size:16px;background:${avatarColor(p.name)}">${p.avatar}</div>
+        <div class="flex-1"><div class="t-h3">${p.name}</div><div class="row-sub">${role} · ${set.schoolName}</div></div>
+      </div>
+      ${overflow.length?`<div class="card card-pad-0 mb-4"><div class="list">${overflow.map(t=>`<div class="row" onclick="App.go('${t.k}')"><div class="avatar avatar-sq" style="background:var(--brand-subtle);color:var(--brand)">${icon(t.ic)}</div><div class="row-main"><div class="row-title" style="font-weight:500">${t.label}</div></div><span class="row-chev">${icon('chevronR')}</span></div>`).join('')}</div></div>`:''}
+      <div class="card card-pad-0 mb-4"><div class="list">
+        ${this.S.can(this.S.PERMS.LEAVE_CREATE)?`<div class="row" onclick="App.applyLeave()"><div class="avatar avatar-sq" style="background:var(--info-subtle);color:var(--info)">${icon('calendar')}</div><div class="row-main"><div class="row-title" style="font-weight:500">Apply for leave</div><div class="row-sub">${this.S.myLeaves().length} request(s)</div></div><span class="row-chev">${icon('chevronR')}</span></div>`:''}
+        <div class="row" onclick="App.go('settings')"><div class="avatar avatar-sq" style="background:var(--brand-subtle);color:var(--brand)">${icon('settings')}</div><div class="row-main"><div class="row-title" style="font-weight:500">Settings</div><div class="row-sub">Theme & preferences</div></div><span class="row-chev">${icon('chevronR')}</span></div>
+      </div></div>
+      <div class="dashed-card mb-4">${icon('shield')} <span class="t-caption">Viewing as <b>${role}</b>. Your navigation is computed from ${this.S.perms().length} permission codes — tap the top banner to switch roles.</span></div>
+      <button class="btn btn-secondary btn-full" onclick="App.roleSwitcher()">${icon('users')} Switch role (review)</button>`;
+  },
+  applyLeave(){
+    const {close}=UI.sheet(`<div class="sheet-title">Apply for leave</div>
+      <div class="field"><label class="field-label">Type</label><select class="select" id="al-type"><option>Casual</option><option>Sick</option><option>Personal</option></select></div>
+      <div class="grid-2"><div class="field"><label class="field-label">From</label><input class="input" id="al-from" type="date"></div>
+      <div class="field"><label class="field-label">To</label><input class="input" id="al-to" type="date"></div></div>
+      <div class="field"><label class="field-label">Reason</label><textarea class="textarea" id="al-reason" placeholder="Brief reason"></textarea></div>
+      <div id="al-err"></div>
+      <button class="btn btn-primary btn-full btn-lg mt-2" onclick="App.saveLeave()">Submit request</button>`);
+    this._leaveClose=close;
+  },
+  saveLeave(){
+    const from=document.getElementById('al-from').value, to=document.getElementById('al-to').value, reason=document.getElementById('al-reason').value.trim();
+    if(!from||!to){ document.getElementById('al-err').innerHTML=`<div class="field-error mb-2">${icon('alert')} Select both dates.</div>`; return; }
+    const days=Math.max(1,Math.round((new Date(to)-new Date(from))/86400000)+1);
+    this.S.addLeave({type:document.getElementById('al-type').value,from,to,days,reason:reason||'—'});
+    this._leaveClose&&this._leaveClose(); UI.toast('Leave request submitted'); this.More(document.getElementById('screen'));
+  },
+
+  Settings(el){
+    this._backTo='more'; this.ctx.sub=true; this.ctx.title='Settings'; this.ctx.subtitle='Theme & preferences';
+    document.querySelector('.appbar')?.remove(); document.getElementById('app').insertAdjacentHTML('afterbegin',this.AppBar());
+    const set=this.F.settings();
+    el.innerHTML=`<div class="card card-pad-0 mb-4"><div class="list">
+      <div class="row" onclick="App.openThemeSheet()"><div class="avatar avatar-sq" style="background:var(--brand-subtle);color:var(--brand)">${icon('palette')}</div><div class="row-main"><div class="row-title" style="font-weight:500">Theme</div><div class="row-sub">${this.themeName(set.theme)} · ${set.mode}</div></div><span class="row-chev">${icon('chevronR')}</span></div>
+    </div></div>
+    <button class="btn btn-secondary btn-full" onclick="App.roleSwitcher()">${icon('users')} Switch role (review)</button>`;
+  },
+
+  /* ---- prototype role switcher (review affordance, NOT a product feature) ---- */
+  roleSwitcher(){
+    const roles=Object.keys(this.S.ROLE_PROFILES); const active=this.S.role();
+    const {close}=UI.sheet(`<div class="sheet-title">Switch role</div>
+      <p class="text-secondary mb-4" style="margin-top:-8px">Review affordance only — see how the app recomputes navigation & screens per role's permissions. Not a real product feature.</p>
+      ${roles.map(r=>{ const p=this.S.ROLE_PROFILES[r]; return `<div class="row" style="border:none;padding:12px 4px" onclick="App.pickRole('${r}')">
+        <div class="avatar" style="background:${avatarColor(p.name)}">${p.avatar}</div>
+        <div class="row-main"><div class="row-title">${r}</div><div class="row-sub">${p.name} · ${p.perms.length} permissions</div></div>
+        ${active===r?`<span style="color:var(--brand)">${icon('check')}</span>`:''}</div>`; }).join('')}
+      <button class="btn btn-secondary btn-full mt-4" onclick="App._roleClose()">Done</button>`);
+    this._roleClose=close;
+  },
+  pickRole(r){ this.S.setRole(r); this._roleClose&&this._roleClose(); this.route='dashboard'; this.ctx={}; this.render(); UI.toast('Now viewing as '+r); },
+
+  /* ---- theme (shared) ---- */
+  themes:[['violet','Violet','#7C5CFF','Default'],['indigo','Indigo','#4F46E5',''],['emerald','Emerald','#059669',''],['slate','Slate','#475569',''],['amber','Warm Amber','#D97706',''],['contrast','High Contrast','#1D4ED8','Accessibility']],
+  themeName(k){ return (this.themes.find(t=>t[0]===k)||[])[1]||k; },
+  openThemeSheet(){
+    const st=this.F.settings();
+    const {el,close}=UI.sheet(`<div class="sheet-title">Appearance</div>
+      <div class="segmented mb-4" id="modeSeg">${[['light','Light'],['dark','Dark'],['system','Auto']].map(([k,l])=>`<button class="${st.mode===k?'active':''}" onclick="App.setMode('${k}')">${l}</button>`).join('')}</div>
+      <div class="field-label mb-2">Theme</div><div id="themeList"></div>
+      <button class="btn btn-secondary btn-full mt-4" onclick="App._themeClose()">Done</button>`);
+    this._themeSheetEl=el; this._themeClose=close; this._renderThemeList();
+  },
+  _renderThemeList(){
+    const st=this.F.settings();
+    this._themeSheetEl.querySelector('#themeList').innerHTML=this.themes.map(([k,name,col,tag])=>`
+      <div class="row" style="border:none;padding:10px 4px" onclick="App.setTheme('${k}')">
+        <div style="width:36px;height:36px;border-radius:50%;background:${col};border:2px solid var(--border-subtle);flex-shrink:0"></div>
+        <div class="row-main"><div class="row-title" style="font-weight:600">${name}</div>${tag?`<div class="row-sub">${tag}</div>`:''}</div>
+        ${st.theme===k?`<span style="color:var(--brand)">${icon('check')}</span>`:''}</div>`).join('');
+  },
+  setTheme(k){ this.F.updateSettings({theme:k}); this.applyTheme(k,this.F.settings().mode); this._renderThemeList(); },
+  setMode(k){ this.F.updateSettings({mode:k}); this.applyTheme(this.F.settings().theme,k); this._themeSheetEl.querySelectorAll('#modeSeg button').forEach(b=>b.classList.toggle('active',b.textContent.toLowerCase().startsWith(k==='system'?'auto':k))); },
+
+  /* ---- helpers ---- */
+  noPermission(el){ el.innerHTML=`<div class="state"><div class="state-ill">${icon('shield')}</div><div class="state-title">Not available</div><div class="state-msg">Your role doesn't include this. Navigation only ever shows what you're permitted to use.</div></div>`; },
+  notImplemented(w){ UI.toast((w||'This')+' — demonstrated in a later stage','error'); },
+  resetPrompt(){ UI.confirm({title:'Reset demo data?',message:'Leads, leaves, attendance and payments will be regenerated.',confirmText:'Reset',danger:true}).then(ok=>{ if(ok){ this.S.reset(); this.F.reset(); this.route='dashboard'; this.ctx={}; this.render(); UI.toast('Demo data reset'); } }); },
+};
+App.init();
+</script>
+</body>
+</html>
