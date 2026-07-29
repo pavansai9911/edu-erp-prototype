@@ -166,6 +166,26 @@ svg{width:20px;height:20px;flex-shrink:0;}
   background-repeat:no-repeat;background-position:right 12px center;background-size:18px;padding-right:40px;}
 .field-error{font-size:var(--t-caption);color:var(--danger);margin-top:var(--sp-1);display:flex;align-items:center;gap:4px;}
 .field-hint{font-size:var(--t-caption);color:var(--text-tertiary);margin-top:var(--sp-1);}
+
+/* permission picker (role-first, then refine by module) */
+.perm-check{display:flex;align-items:center;gap:12px;padding:10px 6px;cursor:pointer;border-radius:var(--r-sm);transition:background var(--m-fast);}
+.perm-check:active{background:var(--surface-sunken);}
+.perm-check .perm-box{width:22px;height:22px;flex-shrink:0;border:2px solid var(--border-strong);border-radius:6px;display:grid;place-items:center;transition:all var(--m-fast);}
+.perm-check .perm-box svg{width:14px;height:14px;color:#fff;}
+.perm-check.on .perm-box{background:var(--brand);border-color:var(--brand);}
+
+/* attendance P/A/L/H/E — compact per-row segmented control */
+.att-seg{display:flex;gap:4px;margin-top:8px;}
+.att-seg button{flex:1;min-height:34px;border-radius:var(--r-xs);font-size:var(--t-caption);font-weight:700;
+  border:1.5px solid var(--border-subtle);background:var(--surface);color:var(--text-tertiary);transition:all var(--m-fast);}
+.att-seg button.active.st-P{background:var(--success-subtle);border-color:var(--success);color:var(--success);}
+.att-seg button.active.st-A{background:var(--danger-subtle);border-color:var(--danger);color:var(--danger);}
+.att-seg button.active.st-L{background:var(--warning-subtle);border-color:var(--warning);color:var(--warning);}
+.att-seg button.active.st-H{background:var(--info-subtle);border-color:var(--info);color:var(--info);}
+.att-seg button.active.st-E{background:var(--surface-sunken);border-color:var(--border-strong);color:var(--text-secondary);}
+.att-counts{display:flex;gap:14px;overflow-x:auto;scrollbar-width:none;}
+.att-counts::-webkit-scrollbar{display:none;}
+.att-counts>div{flex-shrink:0;}
 .input-affix{position:relative;display:flex;align-items:center;}
 .input-affix .prefix{position:absolute;left:var(--sp-3);color:var(--text-secondary);font-weight:600;pointer-events:none;}
 .input-affix .input{padding-left:30px;}
