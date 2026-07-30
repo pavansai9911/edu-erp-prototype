@@ -19,6 +19,7 @@
 <script src="../shared/auth.js"></script>
 <script src="../shared/utils.js"></script>
 <script src="../shared/founder-data.js"></script>
+<script src="../shared/staff-data.js"></script>
 <script>
 /* ============================================================================
    FOUNDER APP — the BUY surface. "Show with reports, don't tell with text."
@@ -28,7 +29,7 @@ const App = {
   route:'dashboard', ctx:{},
   systemDark:window.matchMedia('(prefers-color-scheme:dark)').matches,
   loadingMs:600,
-  F:FounderDB,
+  F:FounderDB, S:StaffDB,
 
   init(){
     const s=this.F.settings();
@@ -116,6 +117,11 @@ const App = {
       case 'report': return this.ReportView(el);
       case 'more': return this.More(el);
       case 'staff': return this.Staff(el);
+      case 'staffDetail': return this.StaffDetail(el);
+      case 'addStaff': return this.AddStaff(el);
+      case 'editStaff': return this.AddStaff(el);
+      case 'roles': return this.Roles(el);
+      case 'roleDetail': return this.RoleDetail(el);
       case 'setup': return this.Setup(el);
       case 'settings': return this.Settings(el);
     }
@@ -480,7 +486,7 @@ const App = {
         <div class="flex-1"><div class="t-h3">${s.name}</div><div class="row-sub">${s.role} · ${set.schoolName}</div></div>
       </div>
       <div class="card card-pad-0 mb-4"><div class="list">
-        ${this.moreRow('briefcase','Staff','View your team & hierarchy','staff')}
+        ${this.moreRow('briefcase','Staff','Directory, logins & roles','staff')}
         ${this.moreRow('settings','School setup','Profile, branches, fees, staff','setup')}
         ${this.moreRow('palette','Appearance','Theme & display','__theme')}
       </div></div>
@@ -498,40 +504,222 @@ const App = {
       <span class="row-chev">${icon('chevronR')}</span></div>`;
   },
 
-  /* ---- Staff hierarchy ---- */
+  /* ---- STAFF DIRECTORY — real RBAC data, shared with the Staff app (StaffDB) ---- */
   Staff(el){
-    this._backTo='more'; this.ctx.sub=true; this.ctx.title='Staff'; this.ctx.subtitle='Your team';
+    this._backTo='more'; this.ctx.sub=true; this.ctx.title='Staff'; this.ctx.subtitle=this.S.staffUsers().length+' people';
+    this.ctx.action=`<button class="appbar-btn" onclick="App.go('addStaff')" aria-label="Add staff">${icon('userPlus')}</button>`;
     document.querySelector('.appbar')?.remove(); document.getElementById('app').insertAdjacentHTML('afterbegin',this.AppBar());
+    this._staffSearch=this._staffSearch||'';
     const sk=`${'<div class="sk-row"><div class="sk sk-circle"></div><div style="flex:1"><div class="sk sk-line" style="width:50%"></div><div class="sk sk-line" style="width:30%"></div></div></div>'.repeat(5)}`;
-    this.withLoading(el,sk,()=>{
-      const staff=this.F.staff(); const principal=staff.find(s=>!s.reportsTo); const reports=staff.filter(s=>s.reportsTo);
-      const roleChip=r=>r==='Principal'?'chip-brand':r==='Accountant'?'chip-info':r==='Receptionist'?'chip-warning':'chip-neutral';
-      return `
-        <div class="sec-head"><div class="sec-title">Leadership</div></div>
-        <div class="card card-pad-0 mb-4"><div class="list">${this.staffRow(principal,roleChip)}</div></div>
-        <div class="sec-head"><div class="sec-title">Reporting to ${principal.name.split(' ')[0]}</div><span class="t-caption">${reports.length}</span></div>
-        <div class="card card-pad-0"><div class="list">${reports.map(s=>this.staffRow(s,roleChip)).join('')}</div></div>
-      `;
-    });
+    this.withLoading(el,sk,()=>this._staffListMarkup());
   },
-  staffRow(s,roleChip){
-    return `<div class="row" onclick="App.openStaff('${s.id}')">
-      <div class="avatar" style="background:${avatarColor(s.name)}">${initials(s.name)}</div>
-      <div class="row-main"><div class="row-title">${s.name}</div><div class="row-sub">${s.section?s.role+' · '+s.section:s.role}</div></div>
-      <div class="row-trail"><span class="chip ${roleChip(s.role)}">${s.role}</span></div>
+  _staffListMarkup(){
+    const q=(this._staffSearch||'').toLowerCase();
+    let list=this.S.staffUsers();
+    if(q) list=list.filter(u=>u.name.toLowerCase().includes(q)||u.designation.toLowerCase().includes(q)||(u.department||'').toLowerCase().includes(q));
+    const byDept={}; list.forEach(u=>{ const d=u.department||'Other'; (byDept[d]=byDept[d]||[]).push(u); });
+    return `<div class="input-affix mb-3"><span style="position:absolute;left:14px;color:var(--text-tertiary);display:grid">${icon('search')}</span>
+      <input class="input" style="padding-left:42px" placeholder="Search name, designation, department…" value="${this._staffSearch||''}" oninput="App.searchStaff(this.value)"></div>
+      ${list.length===0?`<div class="state" style="min-height:30vh"><div class="state-ill">${icon('search')}</div><div class="state-title">No staff found</div></div>`
+      : Object.keys(byDept).sort().map(dept=>`<div class="sec-head"><div class="sec-title">${dept}</div><span class="t-caption">${byDept[dept].length}</span></div>
+        <div class="card card-pad-0 mb-3"><div class="list">${byDept[dept].map(u=>this.staffRow(u)).join('')}</div></div>`).join('')}
+      <button class="btn btn-primary btn-full btn-lg mt-2" onclick="App.go('addStaff')">${icon('userPlus')} Add staff member</button>`;
+  },
+  searchStaff(v){ this._staffSearch=v; const el=document.getElementById('screen'); const sc=el.scrollTop; el.innerHTML=this._staffListMarkup(); el.scrollTop=sc; const i=el.querySelector('input'); if(i){i.focus();i.setSelectionRange(v.length,v.length);} },
+  staffRow(u){
+    const r=this.S.roleById(u.roleId);
+    return `<div class="row" onclick="App.go('staffDetail',{sub:true,id:'${u.id}'})">
+      <div class="avatar" style="background:${avatarColor(u.name)}">${u.avatar}</div>
+      <div class="row-main"><div class="row-title">${u.name}</div><div class="row-sub">${u.designation}${r?' · '+r.name:''}</div></div>
       <span class="row-chev">${icon('chevronR')}</span></div>`;
   },
-  openStaff(id){
-    const s=this.F.staffById(id);
-    UI.sheet(`<div class="sheet-title">${s.name}</div>
-      <div class="flex gap-3 items-center mb-4"><div class="avatar" style="width:56px;height:56px;font-size:18px;background:${avatarColor(s.name)}">${initials(s.name)}</div>
-      <div><div class="chip chip-brand">${s.role}</div>${s.section?`<div class="row-sub mt-1">Class teacher · ${s.section}</div>`:''}</div></div>
-      <div class="card"><div class="dl">
-        <div class="dl-row"><span class="dl-key">${icon('mail')} Email</span><span class="dl-val">${s.email}</span></div>
-        <div class="dl-row"><span class="dl-key">${icon('phone')} Phone</span><span class="dl-val">${s.phone}</span></div>
-        <div class="dl-row"><span class="dl-key">Reports to</span><span class="dl-val">${s.reportsTo?this.F.staffById(s.reportsTo).name:'—'}</span></div>
+  StaffDetail(el){
+    const u=this.S.staffUserById(this.ctx.id); if(!u){ el.innerHTML='<div class="state"><div class="state-title">Not found</div></div>'; return; }
+    this._backTo='staff';
+    const r=this.S.roleById(u.roleId); const mgr=u.reportsToId?this.S.staffUserById(u.reportsToId):null;
+    this.ctx.title=u.name; this.ctx.subtitle=u.designation;
+    this.ctx.action=`<button class="appbar-btn" onclick="App.go('editStaff',{sub:true,id:'${u.id}',edit:true})" aria-label="Edit">${icon('edit')}</button>`;
+    document.querySelector('.appbar')?.remove(); document.getElementById('app').insertAdjacentHTML('afterbegin',this.AppBar());
+    el.innerHTML=`
+      <div class="card card-raised mb-4 flex gap-3 items-center">
+        <div class="avatar" style="width:56px;height:56px;font-size:18px;background:${avatarColor(u.name)}">${u.avatar}</div>
+        <div class="flex-1"><div class="t-h3">${u.name}</div><div class="row-sub">${u.designation} · ${u.department||'—'}</div></div>
+      </div>
+      <div class="card mb-4"><div class="dl">
+        <div class="dl-row"><span class="dl-key">Login email</span><span class="dl-val">${u.email}</span></div>
+        <div class="dl-row"><span class="dl-key">Login status</span><span class="dl-val">${u.passwordSet?`<span class="chip chip-success">Active</span>`:`<span class="chip chip-warning">Password not set</span>`}</span></div>
+        <div class="dl-row"><span class="dl-key">Department</span><span class="dl-val">${u.department||'—'}</span></div>
+        <div class="dl-row"><span class="dl-key">Reports to</span><span class="dl-val">${mgr?mgr.name:'—'}</span></div>
+        ${u.section?`<div class="dl-row"><span class="dl-key">Class section</span><span class="dl-val">${u.section}</span></div>`:''}
       </div></div>
-      <p class="t-caption text-center mt-4">Staff logins & permissions are managed in Setup.</p>`);
+      <div class="sec-head"><div class="sec-title">Role & access</div><button class="sec-link" onclick="App.openRole('${r?r.id:''}')">View role</button></div>
+      <div class="card mb-4">
+        <div class="flex between items-center mb-3"><div class="row-title">${r?r.name:'—'}</div><span class="chip chip-brand">${r?r.perms.length:0} permissions</span></div>
+        <div class="flex gap-2" style="flex-wrap:wrap">${r?this._permChips(r.perms):''}</div>
+      </div>
+      <button class="btn btn-secondary btn-full" onclick="App.go('editStaff',{sub:true,id:'${u.id}',edit:true})">${icon('edit')} Edit staff</button>`;
+  },
+  _permChips(perms){
+    const byMod={}; perms.forEach(p=>{ const m=this.S.moduleOf(p); byMod[m]=(byMod[m]||0)+1; });
+    return Object.entries(byMod).map(([m,n])=>`<span class="chip chip-neutral">${m} ${n}</span>`).join('');
+  },
+
+  /* ---- ADD / EDIT STAFF — mirrors staff/index.html for parity, adapted to Founder's shell.
+     Founder is the account owner: always authorized, no permission gate needed. ---- */
+  AddStaff(el){
+    const editing=!!this.ctx.edit; const existing=editing?this.S.staffUserById(this.ctx.id):null;
+    this._backTo=editing?'staffDetail':'staff';
+    this._staffDraft = existing ? {
+      name:existing.name,email:existing.email,password:existing.passwordSet?'••••••••':'',
+      designation:existing.designation,department:existing.department||'',
+      reportsToId:existing.reportsToId||'',roleId:existing.roleId,section:existing.section||''
+    } : { name:'',email:'',password:'',designation:'',department:'',reportsToId:'',roleId:this.S.roleByCode('TEACHER').id,section:'' };
+    const role=this.S.roleById(this._staffDraft.roleId);
+    this._permDraft = new Set(role?role.perms:[]);
+    this._permCustomised=false;
+    this.ctx.sub=true; this.ctx.title=editing?'Edit staff':'Add staff';
+    this.ctx.subtitle=editing?'Update details & access':'Creates a real login — only you can do this';
+    this.ctx.action='';
+    document.querySelector('.appbar')?.remove(); document.getElementById('app').insertAdjacentHTML('afterbegin',this.AppBar());
+    el.innerHTML=this._addStaffMarkup(editing);
+  },
+  _addStaffMarkup(editing){
+    const d=this._staffDraft;
+    const depts=['Academics','Administration','Finance','Library','Science Lab','Sports','Transport','Counseling'];
+    const managers=this.S.staffUsers().filter(u=>!editing||u.id!==this.ctx.id);
+    const roles=this.S.roles();
+    return `
+      <div class="field"><label class="field-label">Full name <span class="req">*</span></label>
+        <input class="input" id="st-name" placeholder="e.g. Priya Sharma" value="${d.name}" oninput="App._staffField('name',this.value)"></div>
+      <div class="field"><label class="field-label">Login email <span class="req">*</span></label>
+        <div class="input-affix"><span style="position:absolute;left:14px;color:var(--text-tertiary);display:grid">${icon('mail')}</span>
+        <input class="input" style="padding-left:42px" id="st-email" type="email" inputmode="email" placeholder="name@school.edu" value="${d.email}" oninput="App._staffField('email',this.value)"></div></div>
+      <div class="field"><label class="field-label">${editing?'Reset login password':'Set login password'} ${editing?'':'<span class="req">*</span>'}</label>
+        <div class="input-affix"><span style="position:absolute;left:14px;color:var(--text-tertiary);display:grid">${icon('lock')}</span>
+        <input class="input" style="padding-left:42px" id="st-pass" type="text" placeholder="${editing?'Leave blank to keep current':'Temporary password'}" value="${editing?'':d.password}" oninput="App._staffField('password',this.value)"></div>
+        <div class="field-hint">They'll be asked to change it on first login.</div></div>
+      <div class="field"><label class="field-label">Designation <span class="req">*</span></label>
+        <input class="input" id="st-desig" placeholder="e.g. Class Teacher, Librarian" value="${d.designation}" oninput="App._staffField('designation',this.value)"></div>
+      <div class="field"><label class="field-label">Department</label>
+        <select class="select" id="st-dept" onchange="App._staffField('department',this.value)">
+          <option value="">Select department</option>
+          ${depts.map(x=>`<option ${d.department===x?'selected':''}>${x}</option>`).join('')}</select></div>
+      <div class="field"><label class="field-label">Reports to</label>
+        <select class="select" id="st-mgr" onchange="App._staffField('reportsToId',this.value)">
+          <option value="">— None (top level) —</option>
+          ${managers.map(u=>`<option value="${u.id}" ${d.reportsToId===u.id?'selected':''}>${u.name} · ${u.designation}</option>`).join('')}</select></div>
+
+      <div class="sec-head"><div class="sec-title">Role &amp; permissions</div></div>
+      <p class="t-caption mb-3">Pick a role to pre-fill its permissions, then fine-tune below if this person needs something different.</p>
+      <div class="field"><label class="field-label">Role <span class="req">*</span></label>
+        <select class="select" id="st-role" onchange="App.pickStaffRole(this.value)">
+          ${roles.map(r=>`<option value="${r.id}" ${d.roleId===r.id?'selected':''}>${r.name}${r.system?'':' (custom)'}</option>`).join('')}</select>
+        <div class="field-hint" id="role-hint">${this._roleHint()}</div></div>
+
+      <div id="perm-picker">${this._permPickerMarkup()}</div>
+
+      <div id="st-err"></div>
+      <div class="wiz-footer"><button class="btn btn-primary btn-full btn-lg" onclick="App.saveStaff(${editing})">${icon('check')} ${editing?'Save changes':'Create staff & login'}</button></div>`;
+  },
+  _roleHint(){ const r=this.S.roleById(this._staffDraft.roleId); return r?`${r.name}: ${r.desc}`:''; },
+  _staffField(k,v){ this._staffDraft[k]=v; },
+  pickStaffRole(roleId){
+    this._staffDraft.roleId=roleId;
+    const r=this.S.roleById(roleId);
+    this._permDraft = new Set(r?r.perms:[]);
+    this._permCustomised=false;
+    document.getElementById('role-hint').textContent=this._roleHint();
+    document.getElementById('perm-picker').innerHTML=this._permPickerMarkup();
+  },
+  _permPickerMarkup(){
+    const total=this.S.allPerms().length; const on=this._permDraft.size;
+    this._permOpenModules=this._permOpenModules||new Set();
+    return `
+      <div class="card mb-2 flex between items-center" style="background:var(--brand-subtle);border-color:transparent">
+        <div><div class="t-label" style="font-weight:700;color:var(--brand)">${on} of ${total} permissions</div>
+          <div class="t-caption">${this._permCustomised?'Customised for this person':'Matches the '+(this.S.roleById(this._staffDraft.roleId)||{}).name+' role'}</div></div>
+        ${this._permCustomised?`<button class="btn btn-secondary btn-sm" onclick="App.resetPerms()">Reset to role</button>`:''}
+      </div>
+      ${this.S.CATALOG.map(m=>{
+        const open=this._permOpenModules.has(m.module);
+        const modOn=m.perms.filter(p=>this._permDraft.has(p[0])).length;
+        return `<div class="card card-pad-0 mb-2">
+          <div class="row" onclick="App.togglePermModule('${m.module}')" style="cursor:pointer">
+            <div class="avatar avatar-sq" style="background:var(--surface-sunken);color:var(--text-secondary)">${icon(m.icon)}</div>
+            <div class="row-main"><div class="row-title" style="font-weight:600">${m.label}</div><div class="row-sub">${modOn} of ${m.perms.length} selected</div></div>
+            <span style="transform:rotate(${open?180:0}deg);transition:transform .2s;color:var(--text-tertiary)">${icon('chevronD')}</span>
+          </div>
+          ${open?`<div style="padding:4px 12px 12px">${m.perms.map(p=>{
+            const checked=this._permDraft.has(p[0]);
+            return `<div class="perm-check ${checked?'on':''}" onclick="App.togglePerm('${p[0]}')">
+              <div class="perm-box">${checked?icon('check'):''}</div>
+              <div class="flex-1"><div class="t-label" style="font-weight:500">${p[1]}</div><div class="t-code" style="font-size:11px;color:var(--text-tertiary)">${p[0]}</div></div>
+            </div>`; }).join('')}</div>`:''}
+        </div>`; }).join('')}`;
+  },
+  togglePermModule(mod){ if(this._permOpenModules.has(mod))this._permOpenModules.delete(mod); else this._permOpenModules.add(mod); document.getElementById('perm-picker').innerHTML=this._permPickerMarkup(); },
+  togglePerm(code){ if(this._permDraft.has(code))this._permDraft.delete(code); else this._permDraft.add(code); this._permCustomised=true; document.getElementById('perm-picker').innerHTML=this._permPickerMarkup(); },
+  resetPerms(){ const r=this.S.roleById(this._staffDraft.roleId); this._permDraft=new Set(r?r.perms:[]); this._permCustomised=false; document.getElementById('perm-picker').innerHTML=this._permPickerMarkup(); },
+  saveStaff(editing){
+    const d=this._staffDraft; const err=document.getElementById('st-err');
+    const emailOk=/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(d.email);
+    if(!d.name.trim()||!d.email.trim()||!d.designation.trim()){ err.innerHTML=`<div class="field-error mb-2">${icon('alert')} Name, login email and designation are required.</div>`; return; }
+    if(!emailOk){ err.innerHTML=`<div class="field-error mb-2">${icon('alert')} Enter a valid login email.</div>`; return; }
+    if(!editing && !d.password.trim()){ err.innerHTML=`<div class="field-error mb-2">${icon('alert')} Set a login password for the new staff member.</div>`; return; }
+    let roleId=d.roleId;
+    if(this._permCustomised){
+      const base=this.S.roleById(d.roleId);
+      const custom=this.S.addRole({name:d.name.split(' ')[0]+' — custom',desc:'Custom access based on '+(base?base.name:'a role'),perms:[...this._permDraft]});
+      roleId=custom.id;
+    }
+    if(editing){
+      const patch={name:d.name,email:d.email,designation:d.designation,department:d.department,reportsToId:d.reportsToId||null,roleId};
+      if(d.password && d.password!=='••••••••') patch.passwordSet=true;
+      this.S.updateStaff(this.ctx.id,patch);
+      UI.toast('Staff updated');
+      this.go('staffDetail',{sub:true,id:this.ctx.id});
+    }else{
+      const u=this.S.addStaff({name:d.name,email:d.email,password:d.password,designation:d.designation,department:d.department,reportsToId:d.reportsToId||null,roleId,section:d.section||null});
+      UI.toast(`${u.name} added — login created for ${u.email}`);
+      this.go('staff');
+    }
+  },
+
+  /* ---- ROLES & PERMISSIONS — read-only for system roles, same as Staff app ---- */
+  Roles(el){
+    this._backTo='staff'; this.ctx.sub=true; this.ctx.title='Roles & permissions';
+    this.ctx.subtitle=this.S.roles().length+' roles'; this.ctx.action='';
+    document.querySelector('.appbar')?.remove(); document.getElementById('app').insertAdjacentHTML('afterbegin',this.AppBar());
+    const roles=this.S.roles();
+    el.innerHTML=`
+      <p class="t-caption mb-3">Roles are editable bundles of permissions. Every staff member is assigned a role; a custom role can be created any time.</p>
+      <div class="card card-pad-0 mb-4"><div class="list">
+        ${roles.map(r=>{ const count=this.S.staffUsers().filter(u=>u.roleId===r.id).length; return `<div class="row" onclick="App.openRole('${r.id}')">
+          <div class="avatar avatar-sq" style="background:var(--brand-subtle);color:var(--brand)">${icon('shield')}</div>
+          <div class="row-main"><div class="row-title">${r.name} ${r.system?'':'<span class="chip chip-neutral" style="margin-left:4px">custom</span>'}</div><div class="row-sub">${r.perms.length} permissions · ${count} staff</div></div>
+          <span class="row-chev">${icon('chevronR')}</span></div>`; }).join('')}
+      </div></div>`;
+  },
+  openRole(id){ if(!id)return; this.go('roleDetail',{sub:true,id}); },
+  RoleDetail(el){
+    const r=this.S.roleById(this.ctx.id); if(!r){ el.innerHTML='<div class="state"><div class="state-title">Not found</div></div>'; return; }
+    this._backTo='staffDetail';
+    this.ctx.title=r.name; this.ctx.subtitle=r.system?'System role (read-only)':'Custom role';
+    document.querySelector('.appbar')?.remove(); document.getElementById('app').insertAdjacentHTML('afterbegin',this.AppBar());
+    const staffCount=this.S.staffUsers().filter(u=>u.roleId===r.id).length;
+    el.innerHTML=`
+      <div class="card mb-4"><div class="dl">
+        <div class="dl-row"><span class="dl-key">Description</span><span class="dl-val">${r.desc||'—'}</span></div>
+        <div class="dl-row"><span class="dl-key">Permissions</span><span class="dl-val">${r.perms.length}</span></div>
+        <div class="dl-row"><span class="dl-key">Assigned to</span><span class="dl-val">${staffCount} staff</span></div>
+        <div class="dl-row"><span class="dl-key">Type</span><span class="dl-val">${r.system?'System (template)':'Custom'}</span></div>
+      </div></div>
+      <div class="sec-head"><div class="sec-title">Permissions by module</div></div>
+      ${this.S.CATALOG.map(m=>{ const granted=m.perms.filter(p=>r.perms.includes(p[0])); if(granted.length===0)return '';
+        return `<div class="card card-pad-0 mb-2"><div class="row" style="cursor:default"><div class="avatar avatar-sq" style="background:var(--surface-sunken);color:var(--text-secondary)">${icon(m.icon)}</div>
+          <div class="row-main"><div class="row-title" style="font-weight:600">${m.label}</div><div class="row-sub">${granted.map(p=>p[1]).join(' · ')}</div></div>
+          <span class="chip chip-brand">${granted.length}</span></div></div>`; }).join('')}
+      ${r.system?`<div class="dashed-card mt-3">${icon('shield')} <span class="t-caption">System template roles are read-only here. To customise access for one person, edit their staff record and fine-tune permissions.</span></div>`:''}`;
   },
 
   /* ---- Setup ---- */

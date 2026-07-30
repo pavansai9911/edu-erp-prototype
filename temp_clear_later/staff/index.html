@@ -66,7 +66,7 @@ const App = {
   Shell(){
     const tabs=this.computeTabs();
     // if current route not in visible set (e.g. after role switch), redirect to dashboard
-    const routable=[...tabs,...(this._overflowTabs||[])].map(t=>t.k).concat(['more','student','lead','markAttendance','settings']);
+    const routable=[...tabs,...(this._overflowTabs||[])].map(t=>t.k).concat(['more','student','lead','markAttendance','settings','staffList','staffDetail','addStaff','editStaff','roles','roleDetail','selfCheckIn','staffAttendance','academic']);
     if(!routable.includes(this.route)) this.route='dashboard';
     const isSub=this.ctx.sub;
     return `${this.AppBar()}
@@ -116,6 +116,15 @@ const App = {
       case 'reports': return this.Reports(el);
       case 'more': return this.More(el);
       case 'settings': return this.Settings(el);
+      case 'staffList': return this.StaffList(el);
+      case 'staffDetail': return this.StaffDetail(el);
+      case 'addStaff': return this.AddStaff(el);
+      case 'editStaff': return this.AddStaff(el);
+      case 'roles': return this.Roles(el);
+      case 'roleDetail': return this.RoleDetail(el);
+      case 'selfCheckIn': return this.SelfCheckIn(el);
+      case 'staffAttendance': return this.StaffAttendance(el);
+      case 'academic': return this.AcademicStructure(el);
     }
   },
   withLoading(el,sk,build){ el.innerHTML=sk; setTimeout(()=>{ el.innerHTML=build(); if(this._after){this._after();this._after=null;} },this.loadingMs); },
@@ -125,63 +134,166 @@ const App = {
      ======================================================================== */
   Dashboard(el){
     this._backTo='dashboard';
-    const sk=`<div class="grid-2 mb-3">${'<div class="kpi"><div class="sk sk-line" style="width:60%"></div><div class="sk" style="height:22px;width:40%;margin-top:8px"></div></div>'.repeat(2)}</div><div class="card"><div class="sk" style="height:100px"></div></div>`;
+    const sk=`<div class="grid-2 mb-3">${'<div class="kpi"><div class="sk sk-line" style="width:60%"></div><div class="sk" style="height:22px;width:40%;margin-top:8px"></div></div>'.repeat(4)}</div><div class="card"><div class="sk" style="height:120px"></div></div>`;
     this.withLoading(el,sk,()=>{
       const S=this.S, P=S.PERMS;
-      let widgets='';
-      // Quick actions (permission-gated) — the 1-2 most common actions for THIS user
-      const actions=[];
-      if(S.can(P.ATTENDANCE_CREATE)) actions.push(`<button class="btn btn-primary btn-full" onclick="App.go('attendance')">${icon('check')} Mark attendance</button>`);
-      if(S.can(P.FEE_PAYMENT_CREATE)) actions.push(`<button class="btn btn-primary btn-full" onclick="App.go('payments')">${icon('wallet')} Record payment</button>`);
-      if(S.can(P.LEAD_CREATE)) actions.push(`<button class="btn btn-primary btn-full" onclick="App.newLead()">${icon('plus')} New enquiry</button>`);
-      if(S.can(P.LEAVE_APPROVE)) actions.push(`<button class="btn btn-primary btn-full" onclick="App.go('approvals')">${icon('inbox')} Review approvals</button>`);
-
-      // Principal → attention inbox
-      if(S.can(P.LEAVE_APPROVE)){
-        const pl=S.pendingLeaves().length, pa=S.pendingApplications().length;
-        widgets+=`<div class="sec-head"><div class="sec-title">Needs your attention</div></div>
-        <div class="grid-2 mb-3">
-          ${this.dashKpi('inbox','Leave requests',pl,pl?'var(--viz-warning)':'var(--viz-positive)')}
-          ${this.dashKpi('trend','Applications',pa,pa?'var(--viz-warning)':'var(--viz-positive)')}
-        </div>
-        ${pl+pa===0?`<div class="card mb-4" style="text-align:center;color:var(--viz-positive)"><div class="mb-2">${icon('checkCircle')}</div>You're all caught up</div>`:`<button class="btn btn-secondary btn-full mb-4" onclick="App.go('approvals')">Open approvals inbox</button>`}`;
-      }
-      // Teacher → my sections + attendance status
-      if(S.can(P.ATTENDANCE_CREATE)){
-        const secs=S.mySections();
-        widgets+=`<div class="sec-head"><div class="sec-title">Today's attendance</div></div><div class="card card-pad-0 mb-4"><div class="list">
-          ${secs.map(sec=>{ const done=!!S.getAttendance(sec); return `<div class="row" onclick="App.openMarkAttendance('${sec}')">
-            <div class="avatar avatar-sq" style="background:${done?'var(--success-subtle)':'var(--warning-subtle)'};color:${done?'var(--success)':'var(--warning)'}">${icon(done?'check':'calendar')}</div>
-            <div class="row-main"><div class="row-title">Section ${sec}</div><div class="row-sub">${S.sectionRoster(sec).length} students · ${done?'Marked today':'Not marked yet'}</div></div>
-            <span class="chip ${done?'chip-success':'chip-warning'}">${done?'Done':'Pending'}</span></div>`; }).join('')}
-        </div></div>`;
-      }
-      // Accountant → today collection + pending
-      if(S.can(P.FEE_PAYMENT_CREATE)){
-        const today=S.todayCollection(); const fs=this.F.feeSummary();
-        widgets+=`<div class="sec-head"><div class="sec-title">Collections</div></div>
-        <div class="grid-2 mb-4">
-          ${this.dashKpi('wallet','Collected today',fmt.moneyShort(today),'var(--viz-positive)')}
-          ${this.dashKpi('alert','Pending invoices',fs.partial+fs.unpaid,'var(--viz-negative)')}
-        </div>`;
-      }
-      // Receptionist → new leads + follow-ups
-      if(S.can(P.LEAD_VIEW) && !S.can(P.LEAVE_APPROVE)){
-        const f=S.funnel(); const due=S.followUpsDue().length;
-        widgets+=`<div class="sec-head"><div class="sec-title">Admissions today</div></div>
-        <div class="grid-2 mb-3">
-          ${this.dashKpi('trend','Active leads',S.leads().length,'var(--brand)')}
-          ${this.dashKpi('bell','Follow-ups due',due,due?'var(--viz-warning)':'var(--viz-positive)')}
-        </div>
-        <button class="btn btn-secondary btn-full mb-4" onclick="App.go('admissions')">View pipeline</button>`;
-      }
-
-      const actionsBlock = actions.length?`<div class="flex col gap-2 mb-4">${actions.slice(0,2).join('')}</div>`:'';
-      return actionsBlock + widgets + `<div class="dashed-card">${icon('shield')} <span class="t-caption">You see only what your role permits. Switch roles via the banner to compare.</span></div>`;
+      // Exactly one descriptor per §6.5 — chosen by CAPABILITY, not role name, so a
+      // custom role automatically gets the right home screen from what it can actually do.
+      if(S.can(P.LEAVE_APPROVE) && S.can(P.STAFF_CREATE)) return this.DashPrincipal();
+      if(S.can(P.FEE_PAYMENT_CREATE)) return this.DashAccountant();
+      if(S.can(P.ATTENDANCE_CREATE)) return this.DashTeacher();
+      if(S.can(P.LEAD_VIEW)) return this.DashReceptionist();
+      return this.DashEmpty();
     });
   },
-  dashKpi(ic,label,value,color){
-    return `<div class="kpi"><div class="flex items-center gap-2 mb-1"><span style="color:${color};display:grid">${icon(ic)}</span><span class="kpi-label" style="margin:0">${label}</span></div><div class="kpi-value" style="font-size:22px">${value}</div></div>`;
+  dashKpi(ic,label,value,color,sub){
+    return `<div class="kpi"><div class="flex items-center gap-2 mb-1"><span style="color:${color};display:grid">${icon(ic)}</span><span class="kpi-label" style="margin:0">${label}</span></div><div class="kpi-value" style="font-size:22px">${value}</div>${sub?`<div class="kpi-sub">${sub}</div>`:''}</div>`;
+  },
+  quickActions(actions){ // actions: [[icon,label,onclick]]
+    return `<div class="sec-head"><div class="sec-title">Quick actions</div></div>
+      <div class="flex gap-2 mb-4" style="flex-wrap:wrap">${actions.map(([ic,label,fn])=>
+        `<button class="btn btn-secondary" style="flex:1;min-width:120px" onclick="${fn}">${icon(ic)} ${label}</button>`).join('')}</div>`;
+  },
+  aiInsightsSlot(){ // reserved slot — never fill with real-looking data (hard rule)
+    return `<div class="dashed-card">${icon('sparkle')} <span class="t-caption">Insights arrive with Enterprise</span></div>`;
+  },
+
+  /* ---- PRINCIPAL — Attendance today · Pending approvals · Total students · Active staff
+     No primary chart (list-first, per approved prototype). Secondary: activity feed. ---- */
+  DashPrincipal(){
+    const S=this.S;
+    const sections=S.academic().sections;
+    const marked=sections.filter(s=>S.getAttendance(s.name));
+    let attValue='—', attSub='No sections marked yet';
+    if(marked.length){
+      let present=0,total=0;
+      marked.forEach(s=>{ const rec=S.getAttendance(s.name); const marks=Object.values(rec.marks);
+        present+=marks.filter(m=>m==='P').length; total+=marks.length; });
+      attValue=(total?Math.round(present/total*100):0)+'%';
+      attSub=`${marked.length} of ${sections.length} sections marked`;
+    }
+    const pendingApprovals=S.pendingLeaves().length+S.pendingApplications().length;
+    const totalStudents=this.F.students().length;
+    const activeStaff=S.staffUsers().length;
+    return `
+      <div class="grid-2 mb-3">
+        ${this.dashKpi('check','Attendance today',attValue,marked.length?'var(--viz-positive)':'var(--text-tertiary)',attSub)}
+        ${this.dashKpi('inbox','Pending approvals',pendingApprovals,pendingApprovals?'var(--viz-warning)':'var(--viz-positive)')}
+      </div>
+      <div class="grid-2 mb-4">
+        ${this.dashKpi('users','Total students',totalStudents,'var(--info)')}
+        ${this.dashKpi('briefcase','Active staff',activeStaff,'var(--brand)','across the school')}
+      </div>
+      ${this.quickActions([['inbox','Approvals',"App.go('approvals')"],['users','Students',"App.go('students')"],['settings','Setup',"App.go('more')"]])}
+      <div class="sec-head"><div class="sec-title">Activity feed</div></div>
+      ${this._activityFeed(this._principalActivity())}
+      ${this.aiInsightsSlot()}`;
+  },
+
+  /* ---- TEACHER — My section · Attendance marked · My students · Leave balance
+     No chart. Secondary: activity feed (own section). ---- */
+  DashTeacher(){
+    const S=this.S; const u=S.activeUser();
+    const secs=S.mySections();
+    const mySection=u.section||secs[0]||'—';
+    const markedCount=secs.filter(s=>S.getAttendance(s)).length;
+    const myStudents=mySection!=='—'?S.sectionRoster(mySection).length:0;
+    const quota=12; const usedThisYear=S.myLeaves().filter(l=>l.status==='Approved').reduce((sum,l)=>sum+l.days,0);
+    const balance=Math.max(0,quota-usedThisYear);
+    return `
+      <div class="grid-2 mb-3">
+        ${this.dashKpi('building2','My section',mySection,'var(--brand)')}
+        ${this.dashKpi('check','Attendance marked',`${markedCount}/${secs.length}`,markedCount===secs.length&&secs.length?'var(--viz-positive)':'var(--viz-warning)')}
+      </div>
+      <div class="grid-2 mb-4">
+        ${this.dashKpi('users','My students',myStudents,'var(--info)')}
+        ${this.dashKpi('calendar','Leave balance',balance+' days','var(--brand)','of '+quota+'/yr')}
+      </div>
+      ${this.quickActions([['check','Mark attendance',"App.go('attendance')"]])}
+      <div class="sec-head"><div class="sec-title">Activity feed</div><span class="t-caption">${mySection}</span></div>
+      ${this._activityFeed(this._teacherActivity(mySection))}
+      ${this.aiInsightsSlot()}`;
+  },
+
+  /* ---- ACCOUNTANT — Collected today · Receipts · Pending invoices · Partial invoices
+     No chart. Secondary: recent payments. ---- */
+  DashAccountant(){
+    const S=this.S; const today=S.todayCollection();
+    const receiptsToday=this.F.paymentsInPeriod('today').length;
+    const fs=this.F.feeSummary();
+    return `
+      <div class="grid-2 mb-3">
+        ${this.dashKpi('wallet','Collected today',fmt.moneyShort(today),'var(--viz-positive)')}
+        ${this.dashKpi('mail','Receipts',receiptsToday,'var(--brand)','today')}
+      </div>
+      <div class="grid-2 mb-4">
+        ${this.dashKpi('alert','Pending invoices',fs.unpaid,fs.unpaid?'var(--viz-negative)':'var(--viz-positive)')}
+        ${this.dashKpi('clock','Partial invoices',fs.partial,fs.partial?'var(--viz-warning)':'var(--viz-positive)')}
+      </div>
+      ${this.quickActions([['wallet','Record payment',"App.go('payments')"]])}
+      <div class="sec-head"><div class="sec-title">Recent payments</div></div>
+      <div class="card card-pad-0 mb-4"><div class="list">${this.F.recentPayments(5).map(p=>this.paymentRowStaff(p)).join('')||`<div class="row" style="cursor:default"><div class="row-main"><div class="row-title" style="font-weight:400;color:var(--text-tertiary)">No payments recorded yet</div></div></div>`}</div></div>
+      ${this.aiInsightsSlot()}`;
+  },
+  paymentRowStaff(p){
+    return `<div class="row" style="cursor:default"><div class="avatar avatar-sq" style="background:var(--success-subtle);color:var(--success)">${icon('wallet')}</div>
+      <div class="row-main"><div class="row-title">${p.studentName}</div><div class="row-sub">${p.mode} · ${fmt.ago(p.at)}</div></div>
+      <div class="t-data" style="font-weight:700;color:var(--viz-positive)">${fmt.money(p.amount)}</div></div>`;
+  },
+
+  /* ---- RECEPTIONIST — New leads · In progress · Applications · Admitted
+     No chart. Secondary: funnel snapshot. ---- */
+  DashReceptionist(){
+    const S=this.S; const f=S.funnel();
+    const byStage=Object.fromEntries(f.map(x=>[x.stage,x.count]));
+    const inProgress=(byStage.Contacted||0)+(byStage.Visited||0);
+    return `
+      <div class="grid-2 mb-3">
+        ${this.dashKpi('trend','New leads',byStage.Enquiry||0,'var(--brand)')}
+        ${this.dashKpi('clock','In progress',inProgress,'var(--info)')}
+      </div>
+      <div class="grid-2 mb-4">
+        ${this.dashKpi('inbox','Applications',byStage.Applied||0,'var(--viz-warning)')}
+        ${this.dashKpi('check','Admitted',byStage.Admitted||0,'var(--viz-positive)')}
+      </div>
+      ${this.quickActions([['plus','New enquiry',"App.newLead()"]])}
+      <div class="sec-head"><div class="sec-title">Funnel snapshot</div></div>
+      <div class="card mb-4">${f.map(x=>{ const max=Math.max(...f.map(y=>y.count),1);
+        return `<div class="mb-2"><div class="flex between mb-1"><span class="t-label">${x.stage}</span><span class="t-data" style="font-weight:700">${x.count}</span></div>
+        <div style="height:8px;background:var(--surface-sunken);border-radius:99px;overflow:hidden"><div style="width:${(x.count/max)*100}%;height:100%;background:var(--brand);border-radius:99px"></div></div></div>`; }).join('')}</div>
+      ${this.aiInsightsSlot()}`;
+  },
+
+  DashEmpty(){
+    return `<div class="state"><div class="state-ill">${icon('shield')}</div><div class="state-title">No home-screen widgets yet</div>
+      <div class="state-msg">Your assigned permissions don't match a configured dashboard layout. Ask your Principal to review your role.</div></div>`;
+  },
+
+  /* ---- activity feed builders (real events only, chronological) ---- */
+  _activityFeed(events){
+    if(!events.length) return `<div class="card mb-4" style="text-align:center;color:var(--text-tertiary)">${icon('inbox')}<div class="t-caption mt-2">No activity yet today</div></div>`;
+    return `<div class="card card-pad-0 mb-4"><div class="list">${events.slice(0,6).map(e=>`
+      <div class="row" style="cursor:default"><div class="avatar avatar-sq" style="background:${e.bg};color:${e.color}">${icon(e.icon)}</div>
+      <div class="row-main"><div class="row-title" style="font-weight:500">${e.title}</div><div class="row-sub">${e.sub}</div></div>
+      <span class="t-caption">${fmt.ago(e.at)}</span></div>`).join('')}</div></div>`;
+  },
+  _principalActivity(){
+    const S=this.S; const events=[];
+    S.leaves().slice(0,5).forEach(l=>events.push({icon:l.status==='Pending'?'inbox':l.status==='Approved'?'check':'alert',
+      bg:l.status==='Pending'?'var(--warning-subtle)':l.status==='Approved'?'var(--success-subtle)':'var(--danger-subtle)',
+      color:l.status==='Pending'?'var(--warning)':l.status==='Approved'?'var(--success)':'var(--danger)',
+      title:`${l.staffName} — ${l.type} leave`,sub:`${l.status} · ${l.days} day(s)`,at:l.createdAt}));
+    S.applications().slice(0,4).forEach(a=>events.push({icon:'trend',bg:'var(--info-subtle)',color:'var(--info)',
+      title:`${a.childName} applied — ${a.classApplied}`,sub:a.status,at:a.createdAt}));
+    return events.sort((a,b)=>new Date(b.at)-new Date(a.at));
+  },
+  _teacherActivity(section){
+    const S=this.S; const events=[]; const rec=S.getAttendance(section);
+    if(rec){ const marks=Object.values(rec.marks); const present=marks.filter(m=>m==='P').length;
+      events.push({icon:'check',bg:'var(--success-subtle)',color:'var(--success)',title:'Attendance saved — '+section,sub:`${present}/${marks.length} present`,at:rec.savedAt}); }
+    S.myLeaves().slice(0,4).forEach(l=>events.push({icon:'calendar',bg:'var(--info-subtle)',color:'var(--info)',
+      title:`Your ${l.type} leave — ${l.status}`,sub:`${fmt.date(l.from)} – ${fmt.date(l.to)}`,at:l.createdAt}));
+    return events.sort((a,b)=>new Date(b.at)-new Date(a.at));
   },
 
   /* ========================================================================
@@ -210,7 +322,7 @@ const App = {
     // default: all present (existing marks if already saved)
     this._marks={}; roster.forEach(s=>{ this._marks[s.id]= existing? (existing.marks[s.id]||'P') : 'P'; });
     this.ctx.title='Section '+section;
-    this.ctx.subtitle=existing?'Editing today\u2019s attendance':'Tap a student to mark absent';
+    this.ctx.subtitle=existing?'Editing today\u2019s attendance':'Everyone starts Present — tap a state to change it';
     document.querySelector('.appbar')?.remove(); document.getElementById('app').insertAdjacentHTML('afterbegin',this.AppBar());
     this._renderRoster(el,section,roster,existing);
   },
@@ -222,43 +334,43 @@ const App = {
         <span style="color:var(--info);display:grid">${icon('checkCircle')}</span>
         <div class="flex-1"><div class="t-label" style="font-weight:600;color:var(--info)">Already marked ${savedTime}</div><div class="t-caption">You're editing today's attendance. Changes overwrite the earlier save.</div></div>
       </div>`:''}
-      <div class="card card-raised mb-3 flex between items-center" style="position:sticky;top:0;z-index:5">
-        <div class="flex gap-3">
-          <div><div class="t-data-lg" style="color:var(--viz-positive)">${counts.P}</div><div class="t-caption">Present</div></div>
-          <div><div class="t-data-lg" style="color:var(--viz-negative)">${counts.A}</div><div class="t-caption">Absent</div></div>
-          <div><div class="t-data-lg" style="color:var(--viz-warning)">${counts.L}</div><div class="t-caption">Leave</div></div>
-        </div>
-        <div class="t-caption">${roster.length} total</div>
+      <div class="card card-raised mb-3" style="position:sticky;top:0;z-index:5">
+        <div class="flex between items-center mb-1"><span class="t-caption">Section ${section}</span><span class="t-caption">${roster.length} total</span></div>
+        <div class="att-counts" id="att-counts">${this._countsMarkup(counts)}</div>
       </div>
-      <p class="t-caption mb-3">Everyone's marked present by default — just tap the ones who aren't. Tap cycles Present → Absent → Leave.</p>
+      <p class="t-caption mb-3">Everyone's marked <b>Present</b> by default. Tap P / A / L / H / E to change a student.</p>
       <div class="card card-pad-0 mb-4"><div class="list" id="roster">
         ${roster.map(s=>this._attRow(s)).join('')}
       </div></div>
       <div class="wiz-footer"><button class="btn btn-primary btn-full btn-lg" onclick="App.saveAttendance('${section}')">${icon('check')} ${existing?'Update attendance':'Save attendance'}</button></div>`;
   },
+  _countsMarkup(counts){
+    return this.S.ATT_STATES.map(([code,label,cls])=>{
+      const color = code==='P'?'var(--viz-positive)':code==='A'?'var(--viz-negative)':code==='L'?'var(--viz-warning)':code==='H'?'var(--info)':'var(--text-secondary)';
+      return `<div><div class="t-data-lg" style="color:${color}">${counts[code]}</div><div class="t-caption">${label}</div></div>`;
+    }).join('');
+  },
   _attRow(s){
     const m=this._marks[s.id];
-    const cfg={P:['chip-success','P','Present'],A:['chip-danger','A','Absent'],L:['chip-warning','L','Leave']}[m];
-    return `<div class="row" onclick="App.cycleMark('${s.id}')" id="att-${s.id}">
+    return `<div class="row" style="cursor:default;flex-wrap:wrap" id="att-${s.id}">
       <div class="avatar" style="background:${avatarColor(s.name)}">${initials(s.name)}</div>
       <div class="row-main"><div class="row-title">${s.name}</div><div class="row-sub">Roll ${s.roll}</div></div>
-      <span class="chip ${cfg[0]}" style="min-width:74px;justify-content:center">${cfg[2]}</span>
+      <div class="att-seg" style="width:100%;order:3">${this.S.ATT_STATES.map(([code,label])=>
+        `<button class="${m===code?'active st-'+code:''}" onclick="App.setMark('${s.id}','${code}')">${code}</button>`).join('')}</div>
     </div>`;
   },
-  _attCounts(){ const c={P:0,A:0,L:0}; Object.values(this._marks).forEach(m=>c[m]++); return c; },
-  cycleMark(id){
-    const order={P:'A',A:'L',L:'P'}; this._marks[id]=order[this._marks[id]];
-    // update just this row + counts (fast, no full re-render)
+  _attCounts(){ const c={P:0,A:0,L:0,H:0,E:0}; Object.values(this._marks).forEach(m=>c[m]++); return c; },
+  setMark(id,state){
+    if(this._marks[id]===state) return; // no-op, avoid unnecessary re-render
+    this._marks[id]=state;
     const s=this.F.studentById(id);
     document.getElementById('att-'+id).outerHTML=this._attRow(s);
-    const c=this._attCounts();
-    const head=document.querySelector('.card-raised');
-    if(head) head.querySelectorAll('.t-data-lg').forEach((n,i)=>n.textContent=[c.P,c.A,c.L][i]);
+    document.getElementById('att-counts').innerHTML=this._countsMarkup(this._attCounts());
   },
   saveAttendance(section){
     this.S.saveAttendance(section,{...this._marks});
     const c=this._attCounts();
-    UI.toast(`Attendance saved · ${c.P} present, ${c.A} absent`);
+    UI.toast(`Attendance saved · ${c.P} present, ${c.A} absent`+(c.L+c.H+c.E?`, ${c.L+c.H+c.E} other`:''));
     this.go('dashboard');
   },
 
@@ -476,6 +588,24 @@ const App = {
     document.querySelector('.appbar')?.remove(); document.getElementById('app').insertAdjacentHTML('afterbegin',this.AppBar());
     const stages=['Enquiry','Contacted','Visited','Applied','Admitted']; const idx=stages.indexOf(l.stage);
     const canApprove=this.S.can(this.S.PERMS.APPLICATION_APPROVE);
+    const app=this.S.applicationForLead(l.id);
+    // Build the stage-action block: free advance up to Visited; Visited->Applied SUBMITS an
+    // application; Applied->Admitted is NEVER a free button — only the Approvals decision moves it.
+    let stageAction;
+    if(l.stage==='Admitted'){
+      stageAction=`<div class="dashed-card mt-4" style="border-color:var(--viz-positive);color:var(--viz-positive)">${icon('checkCircle')} Admitted</div>`;
+    }else if(l.stage==='Applied'){
+      if(app&&app.status==='Rejected') stageAction=`<div class="dashed-card mt-4" style="border-color:var(--danger);color:var(--danger)">${icon('alert')} Application rejected</div>`;
+      else if(app&&app.status==='Waitlisted') stageAction=`<div class="dashed-card mt-4" style="border-color:var(--warning);color:var(--warning)">${icon('clock')} Waitlisted</div>`;
+      else if(canApprove) stageAction=`<button class="btn btn-primary btn-full mt-4" onclick="App.go('approvals')">${icon('inbox')} Review application in Approvals</button>`;
+      else stageAction=`<div class="dashed-card mt-4">${icon('shield')} <span class="t-caption">Application submitted — awaiting the Principal's decision.</span></div>`;
+    }else if(l.stage==='Visited'){
+      stageAction=this.S.can(this.S.PERMS.LEAD_CREATE)
+        ? `<button class="btn btn-primary btn-full mt-4" onclick="App.submitApplication('${l.id}')">${icon('trend')} Submit application</button>`
+        : `<div class="dashed-card mt-4">${icon('shield')} <span class="t-caption">Only Admissions staff can submit an application.</span></div>`;
+    }else{
+      stageAction=`<button class="btn btn-primary btn-full mt-4" onclick="App.advanceLead('${l.id}','${stages[idx+1]}')">${icon('trend')} Move to ${stages[idx+1]}</button>`;
+    }
     el.innerHTML=`
       <div class="card mb-4"><div class="dl">
         <div class="dl-row"><span class="dl-key">Parent</span><span class="dl-val">${l.parentName}</span></div>
@@ -487,15 +617,19 @@ const App = {
       <div class="sec-head"><div class="sec-title">Stage</div></div>
       <div class="card mb-4">
         <div class="flex gap-2" style="flex-wrap:wrap">${stages.map((st,i)=>`<span class="chip ${i<=idx?'chip-brand':'chip-neutral'}">${st}</span>`).join('')}</div>
-        ${idx<stages.length-1?`<button class="btn btn-primary btn-full mt-4" onclick="App.advanceLead('${l.id}','${stages[idx+1]}')">${icon('trend')} Move to ${stages[idx+1]}</button>`:`<div class="dashed-card mt-4" style="border-color:var(--viz-positive);color:var(--viz-positive)">${icon('checkCircle')} Admitted</div>`}
+        ${stageAction}
       </div>
       <button class="btn btn-secondary btn-full mb-3" onclick="App.addLeadNote('${l.id}')">${icon('edit')} Add note / follow-up</button>
-      ${l.stage==='Applied'&&canApprove?`<button class="btn btn-primary btn-full" onclick="App.go('approvals')">${icon('inbox')} Review application in Approvals</button>`:''}
-      ${l.stage==='Applied'&&!canApprove?`<div class="dashed-card">${icon('shield')} <span class="t-caption">Only the Principal can approve applications.</span></div>`:''}
       ${l.notes.length?`<div class="sec-head"><div class="sec-title">Notes</div></div><div class="card card-pad-0"><div class="list">${l.notes.map(n=>`<div class="row" style="cursor:default"><div class="row-main"><div class="row-title" style="font-weight:400">${n.text}</div><div class="row-sub">${fmt.ago(n.at)}</div></div></div>`).join('')}</div></div>`:''}
     `;
   },
   advanceLead(id,stage){ this.S.moveLeadStage(id,stage); this.LeadDetail(document.getElementById('screen')); UI.toast('Moved to '+stage); },
+  submitApplication(id){
+    this.S.convertLead(id); // creates the linked application record atomically
+    this.LeadDetail(document.getElementById('screen'));
+    this._refreshBadges();
+    UI.toast('Application submitted — sent to Approvals');
+  },
   addLeadNote(id){
     const {close}=UI.sheet(`<div class="sheet-title">Add note</div>
       <div class="field"><textarea class="textarea" id="ln-note" placeholder="Follow-up notes, call summary…"></textarea></div>
@@ -619,21 +753,37 @@ const App = {
   More(el){
     this._backTo='dashboard';
     const p=this.S.profile(); const role=this.S.role(); const set=this.F.settings();
+    const S=this.S, P=S.PERMS;
     // overflow tabs (permission destinations that didn't fit in the bar) surface here
     const overflow=this._overflowTabs||[];
+    // Staff & HR cluster — management rows only (each permission-gated)
+    const hrRows=[];
+    if(S.can(P.STAFF_VIEW)) hrRows.push(this._moreRow('briefcase','Staff directory',S.staffUsers().length+' people','staffList'));
+    if(S.can(P.STAFF_CREATE)) hrRows.push(this._moreRow('userPlus','Add staff','Creates a real login','addStaff'));
+    if(S.can(P.ROLE_VIEW)) hrRows.push(this._moreRow('shield','Roles & permissions',S.roles().length+' roles','roles'));
+    if(S.can(P.STAFF_ATT_VIEW)&&S.can(P.STAFF_VIEW)) hrRows.push(this._moreRow('users','Staff attendance today','Team check-in overview','staffAttendance'));
+    if(S.can(P.ACADEMIC_MANAGE)) hrRows.push(this._moreRow('building2','Academic structure','Classes, sections & subjects','academic'));
     el.innerHTML=`
       <div class="card card-raised mb-4 flex gap-3 items-center">
         <div class="avatar" style="width:52px;height:52px;font-size:16px;background:${avatarColor(p.name)}">${p.avatar}</div>
-        <div class="flex-1"><div class="t-h3">${p.name}</div><div class="row-sub">${role} · ${set.schoolName}</div></div>
+        <div class="flex-1"><div class="t-h3">${p.name}</div><div class="row-sub">${p.designation} · ${role}</div></div>
       </div>
       ${overflow.length?`<div class="card card-pad-0 mb-4"><div class="list">${overflow.map(t=>`<div class="row" onclick="App.go('${t.k}')"><div class="avatar avatar-sq" style="background:var(--brand-subtle);color:var(--brand)">${icon(t.ic)}</div><div class="row-main"><div class="row-title" style="font-weight:500">${t.label}</div></div><span class="row-chev">${icon('chevronR')}</span></div>`).join('')}</div></div>`:''}
+      ${hrRows.length?`<div class="sec-head"><div class="sec-title">Staff & HR</div></div><div class="card card-pad-0 mb-4"><div class="list">${hrRows.join('')}</div></div>`:''}
+      <div class="sec-head"><div class="sec-title">Personal</div></div>
       <div class="card card-pad-0 mb-4"><div class="list">
-        ${this.S.can(this.S.PERMS.LEAVE_CREATE)?`<div class="row" onclick="App.applyLeave()"><div class="avatar avatar-sq" style="background:var(--info-subtle);color:var(--info)">${icon('calendar')}</div><div class="row-main"><div class="row-title" style="font-weight:500">Apply for leave</div><div class="row-sub">${this.S.myLeaves().length} request(s)</div></div><span class="row-chev">${icon('chevronR')}</span></div>`:''}
-        <div class="row" onclick="App.go('settings')"><div class="avatar avatar-sq" style="background:var(--brand-subtle);color:var(--brand)">${icon('settings')}</div><div class="row-main"><div class="row-title" style="font-weight:500">Settings</div><div class="row-sub">Theme & preferences</div></div><span class="row-chev">${icon('chevronR')}</span></div>
+        ${S.can(P.STAFF_ATT_CREATE)?this._moreRow('clock','Self check-in',this._checkinSub(),'selfCheckIn'):''}
+        ${S.can(P.LEAVE_CREATE)?this._moreRow('calendar','Apply for leave',S.myLeaves().length+' request(s)','__applyLeave'):''}
+        ${this._moreRow('settings','Settings','Theme & preferences','settings')}
       </div></div>
-      <div class="dashed-card mb-4">${icon('shield')} <span class="t-caption">Viewing as <b>${role}</b>. Your navigation is computed from ${this.S.perms().length} permission codes — tap the top banner to switch roles.</span></div>
-      <button class="btn btn-secondary btn-full" onclick="App.roleSwitcher()">${icon('users')} Switch role (review)</button>`;
+      <div class="dashed-card mb-4">${icon('shield')} <span class="t-caption">Viewing as <b>${p.name}</b> (${role}). Navigation is computed from ${S.perms().length} live permission codes — tap the top banner to switch staff member.</span></div>
+      <button class="btn btn-secondary btn-full" onclick="App.roleSwitcher()">${icon('users')} Switch staff member (review)</button>`;
   },
+  _moreRow(ic,title,sub,route){
+    const onclick = route==='__applyLeave' ? 'App.applyLeave()' : `App.go('${route}')`;
+    return `<div class="row" onclick="${onclick}"><div class="avatar avatar-sq" style="background:var(--brand-subtle);color:var(--brand)">${icon(ic)}</div><div class="row-main"><div class="row-title" style="font-weight:500">${title}</div><div class="row-sub">${sub}</div></div><span class="row-chev">${icon('chevronR')}</span></div>`;
+  },
+  _checkinSub(){ const r=this.S.myStaffAttendance(); if(!r)return 'Not checked in yet'; if(r.checkIn&&!r.checkOut)return 'Checked in '+fmt.ago(r.checkIn); if(r.checkIn&&r.checkOut)return 'Checked out '+fmt.ago(r.checkOut); return 'Not checked in yet'; },
   applyLeave(){
     const {close}=UI.sheet(`<div class="sheet-title">Apply for leave</div>
       <div class="field"><label class="field-label">Type</label><select class="select" id="al-type"><option>Casual</option><option>Sick</option><option>Personal</option></select></div>
@@ -659,22 +809,405 @@ const App = {
     el.innerHTML=`<div class="card card-pad-0 mb-4"><div class="list">
       <div class="row" onclick="App.openThemeSheet()"><div class="avatar avatar-sq" style="background:var(--brand-subtle);color:var(--brand)">${icon('palette')}</div><div class="row-main"><div class="row-title" style="font-weight:500">Theme</div><div class="row-sub">${this.themeName(set.theme)} · ${set.mode}</div></div><span class="row-chev">${icon('chevronR')}</span></div>
     </div></div>
-    <button class="btn btn-secondary btn-full" onclick="App.roleSwitcher()">${icon('users')} Switch role (review)</button>`;
+    <button class="btn btn-secondary btn-full mb-3" onclick="App.roleSwitcher()">${icon('users')} Switch staff member (review)</button>
+    <div class="card card-pad-0 mb-4"><div class="list">
+      <div class="row" onclick="App.resetPrompt()"><div class="avatar avatar-sq" style="background:var(--danger-subtle);color:var(--danger)">${icon('trash')}</div><div class="row-main"><div class="row-title" style="font-weight:500;color:var(--danger)">Reset demo data</div><div class="row-sub">Regenerate leads, leaves, attendance & payments</div></div></div>
+    </div></div>`;
   },
 
-  /* ---- prototype role switcher (review affordance, NOT a product feature) ---- */
+  /* ========================================================================
+     PHASE B — STAFF DIRECTORY, ADD/EDIT STAFF (role-first permission picker),
+     ROLES & PERMISSIONS.  Gated by STAFF.PROFILE.* and RBAC.ROLE.*
+     ======================================================================== */
+  StaffList(el){
+    this._backTo='more'; this.ctx.sub=true; this.ctx.title='Staff directory';
+    this.ctx.subtitle=this.S.staffUsers().length+' people';
+    this.ctx.action = this.S.can(this.S.PERMS.STAFF_CREATE)
+      ? `<button class="appbar-btn" onclick="App.go('addStaff')" aria-label="Add staff">${icon('userPlus')}</button>` : '';
+    document.querySelector('.appbar')?.remove(); document.getElementById('app').insertAdjacentHTML('afterbegin',this.AppBar());
+    this._staffSearch=this._staffSearch||'';
+    el.innerHTML=this._staffListMarkup();
+  },
+  _staffListMarkup(){
+    const q=(this._staffSearch||'').toLowerCase();
+    let list=this.S.staffUsers();
+    if(q) list=list.filter(u=>u.name.toLowerCase().includes(q)||u.designation.toLowerCase().includes(q)||(u.department||'').toLowerCase().includes(q));
+    // group by department
+    const byDept={}; list.forEach(u=>{ const d=u.department||'Other'; (byDept[d]=byDept[d]||[]).push(u); });
+    const canCreate=this.S.can(this.S.PERMS.STAFF_CREATE);
+    return `<div class="input-affix mb-3"><span style="position:absolute;left:14px;color:var(--text-tertiary);display:grid">${icon('search')}</span>
+      <input class="input" style="padding-left:42px" placeholder="Search name, designation, department…" value="${this._staffSearch||''}" oninput="App.searchStaff(this.value)"></div>
+      ${list.length===0?`<div class="state" style="min-height:30vh"><div class="state-ill">${icon('search')}</div><div class="state-title">No staff found</div></div>`
+      : Object.keys(byDept).sort().map(dept=>`<div class="sec-head"><div class="sec-title">${dept}</div><span class="t-caption">${byDept[dept].length}</span></div>
+        <div class="card card-pad-0 mb-3"><div class="list">${byDept[dept].map(u=>this._staffRow(u)).join('')}</div></div>`).join('')}
+      ${canCreate?`<button class="btn btn-primary btn-full btn-lg mt-2" onclick="App.go('addStaff')">${icon('userPlus')} Add staff member</button>`:''}`;
+  },
+  _staffRow(u){
+    const r=this.S.roleById(u.roleId);
+    return `<div class="row" onclick="App.openStaff('${u.id}')">
+      <div class="avatar" style="background:${avatarColor(u.name)}">${u.avatar}</div>
+      <div class="row-main"><div class="row-title">${u.name}</div><div class="row-sub">${u.designation}${r?' · '+r.name:''}</div></div>
+      <span class="row-chev">${icon('chevronR')}</span></div>`;
+  },
+  searchStaff(v){ this._staffSearch=v; const el=document.getElementById('screen'); const sc=el.scrollTop; el.innerHTML=this._staffListMarkup(); el.scrollTop=sc; const i=el.querySelector('input'); if(i){i.focus();i.setSelectionRange(v.length,v.length);} },
+  openStaff(id){ this.go('staffDetail',{sub:true,id,title:'Staff'}); },
+
+  StaffDetail(el){
+    const u=this.S.staffUserById(this.ctx.id); if(!u){ el.innerHTML='<div class="state"><div class="state-title">Not found</div></div>'; return; }
+    this._backTo='staffList';
+    const r=this.S.roleById(u.roleId); const mgr=u.reportsToId?this.S.staffUserById(u.reportsToId):null;
+    const canEdit=this.S.can(this.S.PERMS.STAFF_UPDATE);
+    this.ctx.title=u.name; this.ctx.subtitle=u.designation;
+    this.ctx.action = canEdit?`<button class="appbar-btn" onclick="App.go('editStaff',{sub:true,id:'${u.id}',edit:true})" aria-label="Edit">${icon('edit')}</button>`:'';
+    document.querySelector('.appbar')?.remove(); document.getElementById('app').insertAdjacentHTML('afterbegin',this.AppBar());
+    el.innerHTML=`
+      <div class="card card-raised mb-4 flex gap-3 items-center">
+        <div class="avatar" style="width:56px;height:56px;font-size:18px;background:${avatarColor(u.name)}">${u.avatar}</div>
+        <div class="flex-1"><div class="t-h3">${u.name}</div><div class="row-sub">${u.designation} · ${u.department||'—'}</div></div>
+      </div>
+      <div class="card mb-4"><div class="dl">
+        <div class="dl-row"><span class="dl-key">Login email</span><span class="dl-val">${u.email}</span></div>
+        <div class="dl-row"><span class="dl-key">Login status</span><span class="dl-val">${u.passwordSet?`<span class="chip chip-success">Active</span>`:`<span class="chip chip-warning">Password not set</span>`}</span></div>
+        <div class="dl-row"><span class="dl-key">Department</span><span class="dl-val">${u.department||'—'}</span></div>
+        <div class="dl-row"><span class="dl-key">Reports to</span><span class="dl-val">${mgr?mgr.name:'—'}</span></div>
+        ${u.section?`<div class="dl-row"><span class="dl-key">Class section</span><span class="dl-val">${u.section}</span></div>`:''}
+      </div></div>
+      <div class="sec-head"><div class="sec-title">Role & access</div>${this.S.can(this.S.PERMS.ROLE_VIEW)?`<button class="sec-link" onclick="App.openRole('${r?r.id:''}')">View role</button>`:''}</div>
+      <div class="card mb-4">
+        <div class="flex between items-center mb-3"><div class="row-title">${r?r.name:'—'}</div><span class="chip chip-brand">${r?r.perms.length:0} permissions</span></div>
+        <div class="flex gap-2" style="flex-wrap:wrap">${r?this._permChips(r.perms):''}</div>
+      </div>
+      ${canEdit?`<button class="btn btn-secondary btn-full" onclick="App.go('editStaff',{sub:true,id:'${u.id}',edit:true})">${icon('edit')} Edit staff</button>`:''}`;
+  },
+  _permChips(perms){
+    // show module-grouped counts as chips (a full list would overwhelm)
+    const byMod={}; perms.forEach(p=>{ const m=this.S.moduleOf(p); byMod[m]=(byMod[m]||0)+1; });
+    return Object.entries(byMod).map(([m,n])=>`<span class="chip chip-neutral">${m} ${n}</span>`).join('');
+  },
+
+  /* ---- ADD / EDIT STAFF — the flagged screen ---- */
+  AddStaff(el){
+    const editing=!!this.ctx.edit; const existing=editing?this.S.staffUserById(this.ctx.id):null;
+    this._backTo=editing?'staffDetail':'staffList';
+    // working draft
+    this._staffDraft = existing ? {
+      name:existing.name,email:existing.email,password:existing.passwordSet?'••••••••':'',
+      designation:existing.designation,department:existing.department||'',
+      reportsToId:existing.reportsToId||'',roleId:existing.roleId,section:existing.section||''
+    } : { name:'',email:'',password:'',designation:'',department:'',reportsToId:'',roleId:this.S.roleByCode('TEACHER').id,section:'' };
+    // custom permission overrides start from the selected role's perms
+    const role=this.S.roleById(this._staffDraft.roleId);
+    this._permDraft = new Set(role?role.perms:[]);
+    this._permCustomised=false;
+    this.ctx.sub=true; this.ctx.title=editing?'Edit staff':'Add staff';
+    this.ctx.subtitle=editing?'Update details & access':'Creates a real login — only you can do this';
+    this.ctx.action='';
+    document.querySelector('.appbar')?.remove(); document.getElementById('app').insertAdjacentHTML('afterbegin',this.AppBar());
+    el.innerHTML=this._addStaffMarkup(editing);
+  },
+  _addStaffMarkup(editing){
+    const d=this._staffDraft;
+    const depts=['Academics','Administration','Finance','Library','Science Lab','Sports','Transport','Counseling'];
+    const managers=this.S.staffUsers().filter(u=>!editing||u.id!==this.ctx.id);
+    const roles=this.S.roles();
+    return `
+      <div class="field"><label class="field-label">Full name <span class="req">*</span></label>
+        <input class="input" id="st-name" placeholder="e.g. Priya Sharma" value="${d.name}" oninput="App._staffField('name',this.value)"></div>
+      <div class="field"><label class="field-label">Login email <span class="req">*</span></label>
+        <div class="input-affix"><span style="position:absolute;left:14px;color:var(--text-tertiary);display:grid">${icon('mail')}</span>
+        <input class="input" style="padding-left:42px" id="st-email" type="email" inputmode="email" placeholder="name@school.edu" value="${d.email}" oninput="App._staffField('email',this.value)"></div></div>
+      <div class="field"><label class="field-label">${editing?'Reset login password':'Set login password'} ${editing?'':'<span class="req">*</span>'}</label>
+        <div class="input-affix"><span style="position:absolute;left:14px;color:var(--text-tertiary);display:grid">${icon('lock')}</span>
+        <input class="input" style="padding-left:42px" id="st-pass" type="text" placeholder="${editing?'Leave blank to keep current':'Temporary password'}" value="${editing?'':d.password}" oninput="App._staffField('password',this.value)"></div>
+        <div class="field-hint">They'll be asked to change it on first login.</div></div>
+      <div class="field"><label class="field-label">Designation <span class="req">*</span></label>
+        <input class="input" id="st-desig" placeholder="e.g. Class Teacher, Librarian" value="${d.designation}" oninput="App._staffField('designation',this.value)"></div>
+      <div class="field"><label class="field-label">Department</label>
+        <select class="select" id="st-dept" onchange="App._staffField('department',this.value)">
+          <option value="">Select department</option>
+          ${depts.map(x=>`<option ${d.department===x?'selected':''}>${x}</option>`).join('')}</select></div>
+      <div class="field"><label class="field-label">Reports to</label>
+        <select class="select" id="st-mgr" onchange="App._staffField('reportsToId',this.value)">
+          <option value="">— None (top level) —</option>
+          ${managers.map(u=>`<option value="${u.id}" ${d.reportsToId===u.id?'selected':''}>${u.name} · ${u.designation}</option>`).join('')}</select></div>
+
+      <div class="sec-head"><div class="sec-title">Role &amp; permissions</div></div>
+      <p class="t-caption mb-3">Pick a role to pre-fill its permissions, then fine-tune below if this person needs something different.</p>
+      <div class="field"><label class="field-label">Role <span class="req">*</span></label>
+        <select class="select" id="st-role" onchange="App.pickStaffRole(this.value)">
+          ${roles.map(r=>`<option value="${r.id}" ${d.roleId===r.id?'selected':''}>${r.name}${r.system?'':' (custom)'}</option>`).join('')}</select>
+        <div class="field-hint" id="role-hint">${this._roleHint()}</div></div>
+
+      <div id="perm-picker">${this._permPickerMarkup()}</div>
+
+      <div id="st-err"></div>
+      <div class="wiz-footer"><button class="btn btn-primary btn-full btn-lg" onclick="App.saveStaff(${editing})">${icon('check')} ${editing?'Save changes':'Create staff & login'}</button></div>`;
+  },
+  _roleHint(){ const r=this.S.roleById(this._staffDraft.roleId); return r?`${r.name}: ${r.desc}`:''; },
+  _staffField(k,v){ this._staffDraft[k]=v; },
+  pickStaffRole(roleId){
+    this._staffDraft.roleId=roleId;
+    const r=this.S.roleById(roleId);
+    this._permDraft = new Set(r?r.perms:[]);
+    this._permCustomised=false;
+    document.getElementById('role-hint').textContent=this._roleHint();
+    document.getElementById('perm-picker').innerHTML=this._permPickerMarkup();
+  },
+  _permPickerMarkup(){
+    const total=this.S.allPerms().length; const on=this._permDraft.size;
+    this._permOpenModules=this._permOpenModules||new Set();
+    return `
+      <div class="card mb-2 flex between items-center" style="background:var(--brand-subtle);border-color:transparent">
+        <div><div class="t-label" style="font-weight:700;color:var(--brand)">${on} of ${total} permissions</div>
+          <div class="t-caption">${this._permCustomised?'Customised for this person':'Matches the '+(this.S.roleById(this._staffDraft.roleId)||{}).name+' role'}</div></div>
+        ${this._permCustomised?`<button class="btn btn-secondary btn-sm" onclick="App.resetPerms()">Reset to role</button>`:''}
+      </div>
+      ${this.S.CATALOG.map(m=>{
+        const open=this._permOpenModules.has(m.module);
+        const modOn=m.perms.filter(p=>this._permDraft.has(p[0])).length;
+        return `<div class="card card-pad-0 mb-2">
+          <div class="row" onclick="App.togglePermModule('${m.module}')" style="cursor:pointer">
+            <div class="avatar avatar-sq" style="background:var(--surface-sunken);color:var(--text-secondary)">${icon(m.icon)}</div>
+            <div class="row-main"><div class="row-title" style="font-weight:600">${m.label}</div><div class="row-sub">${modOn} of ${m.perms.length} selected</div></div>
+            <span style="transform:rotate(${open?180:0}deg);transition:transform .2s;color:var(--text-tertiary)">${icon('chevronD')}</span>
+          </div>
+          ${open?`<div style="padding:4px 12px 12px">${m.perms.map(p=>{
+            const checked=this._permDraft.has(p[0]);
+            return `<div class="perm-check ${checked?'on':''}" onclick="App.togglePerm('${p[0]}')">
+              <div class="perm-box">${checked?icon('check'):''}</div>
+              <div class="flex-1"><div class="t-label" style="font-weight:500">${p[1]}</div><div class="t-code" style="font-size:11px;color:var(--text-tertiary)">${p[0]}</div></div>
+            </div>`; }).join('')}</div>`:''}
+        </div>`; }).join('')}`;
+  },
+  togglePermModule(mod){ if(this._permOpenModules.has(mod))this._permOpenModules.delete(mod); else this._permOpenModules.add(mod); document.getElementById('perm-picker').innerHTML=this._permPickerMarkup(); },
+  togglePerm(code){ if(this._permDraft.has(code))this._permDraft.delete(code); else this._permDraft.add(code); this._permCustomised=true; document.getElementById('perm-picker').innerHTML=this._permPickerMarkup(); },
+  resetPerms(){ const r=this.S.roleById(this._staffDraft.roleId); this._permDraft=new Set(r?r.perms:[]); this._permCustomised=false; document.getElementById('perm-picker').innerHTML=this._permPickerMarkup(); },
+  saveStaff(editing){
+    const d=this._staffDraft; const err=document.getElementById('st-err');
+    const emailOk=/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(d.email);
+    if(!d.name.trim()||!d.email.trim()||!d.designation.trim()){ err.innerHTML=`<div class="field-error mb-2">${icon('alert')} Name, login email and designation are required.</div>`; return; }
+    if(!emailOk){ err.innerHTML=`<div class="field-error mb-2">${icon('alert')} Enter a valid login email.</div>`; return; }
+    if(!editing && !d.password.trim()){ err.innerHTML=`<div class="field-error mb-2">${icon('alert')} Set a login password for the new staff member.</div>`; return; }
+    // If permissions were customised away from the template role, persist as a per-user custom role
+    let roleId=d.roleId;
+    if(this._permCustomised){
+      const base=this.S.roleById(d.roleId);
+      const custom=this.S.addRole({name:d.name.split(' ')[0]+' — custom',desc:'Custom access based on '+(base?base.name:'a role'),perms:[...this._permDraft]});
+      roleId=custom.id;
+    }
+    if(editing){
+      const patch={name:d.name,email:d.email,designation:d.designation,department:d.department,reportsToId:d.reportsToId||null,roleId};
+      if(d.password && d.password!=='••••••••') patch.passwordSet=true;
+      this.S.updateStaff(this.ctx.id,patch);
+      UI.toast('Staff updated');
+      this.go('staffDetail',{sub:true,id:this.ctx.id,title:'Staff'});
+    }else{
+      const u=this.S.addStaff({name:d.name,email:d.email,password:d.password,designation:d.designation,department:d.department,reportsToId:d.reportsToId||null,roleId,section:d.section||null});
+      this._staffCreatedToast(u);
+      this.go('staffList');
+    }
+  },
+  _staffCreatedToast(u){ UI.toast(`${u.name} added — login created for ${u.email}`); },
+
+  /* ---- ROLES & PERMISSIONS ---- */
+  Roles(el){
+    this._backTo='more'; this.ctx.sub=true; this.ctx.title='Roles & permissions';
+    this.ctx.subtitle=this.S.roles().length+' roles';
+    this.ctx.action='';
+    document.querySelector('.appbar')?.remove(); document.getElementById('app').insertAdjacentHTML('afterbegin',this.AppBar());
+    const roles=this.S.roles();
+    el.innerHTML=`
+      <p class="t-caption mb-3">Roles are editable bundles of permissions. Every staff member is assigned a role; a custom role can be created any time.</p>
+      <div class="card card-pad-0 mb-4"><div class="list">
+        ${roles.map(r=>{ const count=this.S.staffUsers().filter(u=>u.roleId===r.id).length; return `<div class="row" onclick="App.openRole('${r.id}')">
+          <div class="avatar avatar-sq" style="background:var(--brand-subtle);color:var(--brand)">${icon('shield')}</div>
+          <div class="row-main"><div class="row-title">${r.name} ${r.system?'':'<span class="chip chip-neutral" style="margin-left:4px">custom</span>'}</div><div class="row-sub">${r.perms.length} permissions · ${count} staff</div></div>
+          <span class="row-chev">${icon('chevronR')}</span></div>`; }).join('')}
+      </div></div>`;
+  },
+  openRole(id){ if(!id)return; this.go('roleDetail',{sub:true,id,title:'Role'}); },
+  RoleDetail(el){
+    const r=this.S.roleById(this.ctx.id); if(!r){ el.innerHTML='<div class="state"><div class="state-title">Not found</div></div>'; return; }
+    this._backTo='roles';
+    const canEdit=this.S.can(this.S.PERMS.ROLE_UPDATE) && !r.system; // system roles are read-only in-prototype
+    this.ctx.title=r.name; this.ctx.subtitle=r.system?'System role (read-only)':'Custom role';
+    document.querySelector('.appbar')?.remove(); document.getElementById('app').insertAdjacentHTML('afterbegin',this.AppBar());
+    const staffCount=this.S.staffUsers().filter(u=>u.roleId===r.id).length;
+    el.innerHTML=`
+      <div class="card mb-4"><div class="dl">
+        <div class="dl-row"><span class="dl-key">Description</span><span class="dl-val">${r.desc||'—'}</span></div>
+        <div class="dl-row"><span class="dl-key">Permissions</span><span class="dl-val">${r.perms.length}</span></div>
+        <div class="dl-row"><span class="dl-key">Assigned to</span><span class="dl-val">${staffCount} staff</span></div>
+        <div class="dl-row"><span class="dl-key">Type</span><span class="dl-val">${r.system?'System (template)':'Custom'}</span></div>
+      </div></div>
+      <div class="sec-head"><div class="sec-title">Permissions by module</div></div>
+      ${this.S.CATALOG.map(m=>{ const granted=m.perms.filter(p=>r.perms.includes(p[0])); if(granted.length===0)return '';
+        return `<div class="card card-pad-0 mb-2"><div class="row" style="cursor:default"><div class="avatar avatar-sq" style="background:var(--surface-sunken);color:var(--text-secondary)">${icon(m.icon)}</div>
+          <div class="row-main"><div class="row-title" style="font-weight:600">${m.label}</div><div class="row-sub">${granted.map(p=>p[1]).join(' · ')}</div></div>
+          <span class="chip chip-brand">${granted.length}</span></div></div>`; }).join('')}
+      ${r.system?`<div class="dashed-card mt-3">${icon('shield')} <span class="t-caption">System template roles are read-only here. To customise access for one person, edit their staff record and fine-tune permissions.</span></div>`:''}`;
+  },
+
+  /* ========================================================================
+     PHASE D STUBS — flesh out in Phase D. Kept minimal so rows don't dead-end.
+     ======================================================================== */
+  /* ========================================================================
+     PHASE D — SELF CHECK-IN, STAFF ATTENDANCE OVERVIEW, ACADEMIC STRUCTURE
+     ======================================================================== */
+
+  /* ---- SELF CHECK-IN/OUT — every staff member, permission-gated by STAFF.ATTENDANCE.CREATE ---- */
+  SelfCheckIn(el){
+    this._backTo='more'; this.ctx.sub=true; this.ctx.title='Self check-in'; this.ctx.subtitle='';
+    document.querySelector('.appbar')?.remove(); document.getElementById('app').insertAdjacentHTML('afterbegin',this.AppBar());
+    if(!this.S.can(this.S.PERMS.STAFF_ATT_CREATE)) return this.noPermission(el);
+    el.innerHTML=this._checkInMarkup();
+  },
+  _checkInMarkup(){
+    const rec=this.S.myStaffAttendance();
+    const today=new Date().toLocaleDateString('en-IN',{weekday:'long',day:'numeric',month:'long'});
+    const history=this.S.myRecentAttendance(6).slice(1); // exclude today, show last 5 days
+    let status,action;
+    if(!rec||!rec.checkIn){
+      status=`<div class="card card-raised mb-4" style="text-align:center;padding:32px 20px">
+        <div class="mb-2" style="color:var(--text-tertiary)">${icon('clock')}</div>
+        <div class="t-h3 mb-1">Not checked in yet</div><div class="row-sub">${today}</div></div>`;
+      action=`<button class="btn btn-primary btn-full btn-lg" onclick="App.doCheckIn()">${icon('check')} Check in</button>`;
+    }else if(rec.checkIn && !rec.checkOut){
+      status=`<div class="card card-raised mb-4" style="text-align:center;padding:32px 20px;background:var(--success-subtle);border-color:transparent">
+        <div class="mb-2" style="color:var(--success)">${icon('checkCircle')}</div>
+        <div class="t-h3 mb-1" style="color:var(--success)">Checked in</div><div class="row-sub">${fmt.date(rec.checkIn)} · ${new Date(rec.checkIn).toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'})}</div></div>`;
+      action=`<button class="btn btn-secondary btn-full btn-lg" onclick="App.doCheckOut()">${icon('check')} Check out</button>`;
+    }else{
+      const dur=Math.round((new Date(rec.checkOut)-new Date(rec.checkIn))/60000);
+      status=`<div class="card card-raised mb-4" style="text-align:center;padding:32px 20px">
+        <div class="mb-2" style="color:var(--brand)">${icon('checkCircle')}</div>
+        <div class="t-h3 mb-1">Done for today</div>
+        <div class="row-sub">In ${new Date(rec.checkIn).toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'})} · Out ${new Date(rec.checkOut).toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'})} · ${Math.floor(dur/60)}h ${dur%60}m</div></div>`;
+      action=`<button class="btn btn-secondary btn-full btn-lg" onclick="App.doCheckOut()">${icon('clock')} Update check-out time</button>`;
+    }
+    return `${status}${action}
+      <div class="sec-head mt-4"><div class="sec-title">This week</div></div>
+      <div class="card card-pad-0 mb-4"><div class="list">${history.map(h=>{
+        const d=new Date(h.date); const label=d.toLocaleDateString('en-IN',{weekday:'short',day:'numeric',month:'short'});
+        const present=!!h.checkIn;
+        return `<div class="row" style="cursor:default"><div class="avatar avatar-sq" style="background:${present?'var(--success-subtle)':'var(--surface-sunken)'};color:${present?'var(--success)':'var(--text-tertiary)'}">${icon(present?'check':'clock')}</div>
+        <div class="row-main"><div class="row-title" style="font-weight:500">${label}</div><div class="row-sub">${present?(new Date(h.checkIn).toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'})+(h.checkOut?' – '+new Date(h.checkOut).toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'}):' · still open')):'Not checked in'}</div></div></div>`; }).join('')}</div></div>`;
+  },
+  doCheckIn(){ this.S.staffCheckIn(); UI.toast('Checked in · '+new Date().toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'})); document.getElementById('screen').innerHTML=this._checkInMarkup(); },
+  doCheckOut(){ this.S.staffCheckOut(); UI.toast('Checked out · '+new Date().toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'})); document.getElementById('screen').innerHTML=this._checkInMarkup(); },
+
+  /* ---- STAFF ATTENDANCE OVERVIEW (Principal) — who's in today, at a glance ---- */
+  StaffAttendance(el){
+    this._backTo='more'; this.ctx.sub=true; this.ctx.title='Staff attendance'; this.ctx.subtitle=new Date().toLocaleDateString('en-IN',{weekday:'long',day:'numeric',month:'long'});
+    document.querySelector('.appbar')?.remove(); document.getElementById('app').insertAdjacentHTML('afterbegin',this.AppBar());
+    if(!(this.S.can(this.S.PERMS.STAFF_ATT_VIEW)&&this.S.can(this.S.PERMS.STAFF_VIEW))) return this.noPermission(el);
+    const roster=this.S.staffAttendanceRoster();
+    // not-checked-in first, so a Principal notices gaps immediately
+    const sorted=[...roster].sort((a,b)=>(a.checkIn?1:0)-(b.checkIn?1:0));
+    const inCount=roster.filter(r=>r.checkIn).length;
+    el.innerHTML=`
+      <div class="grid-2 mb-4">
+        ${this.dashKpi('checkCircle','Checked in',inCount,'var(--viz-positive)','of '+roster.length+' staff')}
+        ${this.dashKpi('clock','Not yet',roster.length-inCount,(roster.length-inCount)?'var(--viz-warning)':'var(--viz-positive)')}
+      </div>
+      <div class="card card-pad-0 mb-4"><div class="list">${sorted.map(r=>{
+        const state = !r.checkIn ? ['warning','Not checked in','clock'] : !r.checkOut ? ['success','Checked in','checkCircle'] : ['neutral','Checked out','check'];
+        const time = r.checkIn ? new Date(r.checkIn).toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'}) + (r.checkOut?' – '+new Date(r.checkOut).toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'}):'') : '—';
+        return `<div class="row" style="cursor:default"><div class="avatar" style="background:${avatarColor(r.name)}">${initials(r.name)}</div>
+          <div class="row-main"><div class="row-title">${r.name}</div><div class="row-sub">${r.designation} · ${time}</div></div>
+          <span class="chip chip-${state[0]}">${state[1]}</span></div>`; }).join('')}</div></div>`;
+  },
+
+  /* ---- ACADEMIC STRUCTURE (Principal) — class levels, sections, subjects CRUD ---- */
+  AcademicStructure(el){
+    this._backTo='more'; this.ctx.sub=true; this.ctx.title='Academic structure'; this.ctx.subtitle='Classes, sections & subjects';
+    document.querySelector('.appbar')?.remove(); document.getElementById('app').insertAdjacentHTML('afterbegin',this.AppBar());
+    if(!this.S.can(this.S.PERMS.ACADEMIC_MANAGE)) return this.noPermission(el);
+    this._acadTab=this._acadTab||'classLevels';
+    el.innerHTML=this._academicMarkup();
+  },
+  _academicMarkup(){
+    const a=this.S.academic(); const tab=this._acadTab;
+    const tabs=[['classLevels','Class levels',a.classLevels.length],['sections','Sections',a.sections.length],['subjects','Subjects',a.subjects.length]];
+    return `<div class="segmented mb-4">${tabs.map(([k,l,n])=>`<button class="${tab===k?'active':''}" onclick="App.setAcadTab('${k}')">${l} (${n})</button>`).join('')}</div>
+      <div id="acad-list">${this._acadListMarkup()}</div>
+      <button class="btn btn-primary btn-full btn-lg mt-3" onclick="App.addAcadItem()">${icon('plus')} Add ${tab==='classLevels'?'class level':tab==='sections'?'section':'subject'}</button>`;
+  },
+  _acadListMarkup(){
+    const a=this.S.academic(); const tab=this._acadTab; const items=a[tab];
+    if(items.length===0) return `<div class="dashed-card">No ${tab==='classLevels'?'class levels':tab} yet — add the first one below.</div>`;
+    return `<div class="card card-pad-0"><div class="list">${items.map(it=>{
+      let sub='';
+      if(tab==='sections') sub=`${it.classLevel} · Homeroom: ${it.teacher||'Unassigned'}`;
+      else if(tab==='subjects') sub=it.code;
+      return `<div class="row" style="cursor:default"><div class="avatar avatar-sq" style="background:var(--brand-subtle);color:var(--brand)">${icon(tab==='sections'?'users':tab==='subjects'?'building2':'building2')}</div>
+        <div class="row-main"><div class="row-title">${it.name}</div>${sub?`<div class="row-sub">${sub}</div>`:''}</div>
+        <button class="appbar-btn" style="width:36px;height:36px" onclick="App.removeAcadItem('${it.id}')" aria-label="Remove">${icon('trash')}</button></div>`; }).join('')}</div></div>`;
+  },
+  setAcadTab(k){ this._acadTab=k; document.getElementById('screen').innerHTML=this._academicMarkup(); },
+  addAcadItem(){
+    const tab=this._acadTab; const S=this.S;
+    if(tab==='classLevels'){
+      const {close}=UI.sheet(`<div class="sheet-title">Add class level</div>
+        <div class="field"><label class="field-label">Name <span class="req">*</span></label><input class="input" id="ac-name" placeholder="e.g. Class 6"></div>
+        <div id="ac-err"></div>
+        <button class="btn btn-primary btn-full" onclick="App.saveAcadItem()">Add</button>`);
+      this._acadClose=close;
+    }else if(tab==='subjects'){
+      const {close}=UI.sheet(`<div class="sheet-title">Add subject</div>
+        <div class="field"><label class="field-label">Name <span class="req">*</span></label><input class="input" id="ac-name" placeholder="e.g. Computer Science"></div>
+        <div class="field"><label class="field-label">Code</label><input class="input" id="ac-code" placeholder="e.g. CS" style="text-transform:uppercase"></div>
+        <div id="ac-err"></div>
+        <button class="btn btn-primary btn-full" onclick="App.saveAcadItem()">Add</button>`);
+      this._acadClose=close;
+    }else{ // sections
+      const a=S.academic(); const teachers=S.staffUsers();
+      const {close}=UI.sheet(`<div class="sheet-title">Add section</div>
+        <div class="field"><label class="field-label">Section name <span class="req">*</span></label><input class="input" id="ac-name" placeholder="e.g. 6-A"></div>
+        <div class="field"><label class="field-label">Class level <span class="req">*</span></label>
+          <select class="select" id="ac-class">${a.classLevels.map(c=>`<option>${c.name}</option>`).join('')}</select></div>
+        <div class="field"><label class="field-label">Homeroom teacher</label>
+          <select class="select" id="ac-teacher"><option value="">— Unassigned —</option>${teachers.map(t=>`<option>${t.name}</option>`).join('')}</select></div>
+        <div id="ac-err"></div>
+        <button class="btn btn-primary btn-full" onclick="App.saveAcadItem()">Add</button>`);
+      this._acadClose=close;
+    }
+  },
+  saveAcadItem(){
+    const tab=this._acadTab; const name=document.getElementById('ac-name').value.trim();
+    const err=document.getElementById('ac-err');
+    if(!name){ err.innerHTML=`<div class="field-error mb-2">${icon('alert')} Name is required.</div>`; return; }
+    if(tab==='classLevels') this.S.addAcademic('classLevels',{name});
+    else if(tab==='subjects') this.S.addAcademic('subjects',{name,code:(document.getElementById('ac-code').value.trim()||name.slice(0,3).toUpperCase())});
+    else this.S.addAcademic('sections',{name,classLevel:document.getElementById('ac-class').value,teacher:document.getElementById('ac-teacher').value||null});
+    this._acadClose&&this._acadClose();
+    document.getElementById('screen').innerHTML=this._academicMarkup();
+    UI.toast('Added');
+  },
+  removeAcadItem(id){
+    UI.confirm({title:'Remove this item?',message:'This cannot be undone in the prototype.',confirmText:'Remove',danger:true}).then(ok=>{
+      if(ok){ this.S.removeAcademic(this._acadTab,id); document.getElementById('screen').innerHTML=this._academicMarkup(); UI.toast('Removed'); }
+    });
+  },
+
+  /* ---- prototype user switcher (review affordance, NOT a product feature) ----
+     Switches the "logged-in" staff member. Each person carries their assigned
+     role's LIVE permission set — the app recomputes navigation & screens from
+     can(code), never from a role name. This is the frontend mirror of the
+     backend's dynamic RBAC. */
   roleSwitcher(){
-    const roles=Object.keys(this.S.ROLE_PROFILES); const active=this.S.role();
-    const {close}=UI.sheet(`<div class="sheet-title">Switch role</div>
-      <p class="text-secondary mb-4" style="margin-top:-8px">Review affordance only — see how the app recomputes navigation & screens per role's permissions. Not a real product feature.</p>
-      ${roles.map(r=>{ const p=this.S.ROLE_PROFILES[r]; return `<div class="row" style="border:none;padding:12px 4px" onclick="App.pickRole('${r}')">
-        <div class="avatar" style="background:${avatarColor(p.name)}">${p.avatar}</div>
-        <div class="row-main"><div class="row-title">${r}</div><div class="row-sub">${p.name} · ${p.perms.length} permissions</div></div>
-        ${active===r?`<span style="color:var(--brand)">${icon('check')}</span>`:''}</div>`; }).join('')}
+    const users=this.S.staffUsers(); const activeId=this.S.activeUser().id;
+    const {close}=UI.sheet(`<div class="sheet-title">Switch staff member</div>
+      <p class="text-secondary mb-4" style="margin-top:-8px">Review affordance only — see how the app recomputes navigation & screens from each person's live permissions. Not a real product feature (in production, each person logs in).</p>
+      ${users.map(u=>{ const r=this.S.roleById(u.roleId); return `<div class="row" style="border:none;padding:12px 4px" onclick="App.pickUser('${u.id}')">
+        <div class="avatar" style="background:${avatarColor(u.name)}">${u.avatar}</div>
+        <div class="row-main"><div class="row-title">${u.name}</div><div class="row-sub">${u.designation} · ${r?r.name:'-'} · ${r?r.perms.length:0} permissions</div></div>
+        ${activeId===u.id?`<span style="color:var(--brand)">${icon('check')}</span>`:''}</div>`; }).join('')}
       <button class="btn btn-secondary btn-full mt-4" onclick="App._roleClose()">Done</button>`);
     this._roleClose=close;
   },
-  pickRole(r){ this.S.setRole(r); this._roleClose&&this._roleClose(); this.route='dashboard'; this.ctx={}; this.render(); UI.toast('Now viewing as '+r); },
+  pickUser(id){ this.S.setActiveUser(id); this._roleClose&&this._roleClose(); this.route='dashboard'; this.ctx={}; this.render(); UI.toast('Now viewing as '+this.S.activeUser().name); },
+  pickRole(r){ this.pickUser(r); }, // back-compat alias
 
   /* ---- theme (shared) ---- */
   themes:[['violet','Violet','#7C5CFF','Default'],['indigo','Indigo','#4F46E5',''],['emerald','Emerald','#059669',''],['slate','Slate','#475569',''],['amber','Warm Amber','#D97706',''],['contrast','High Contrast','#1D4ED8','Accessibility']],
