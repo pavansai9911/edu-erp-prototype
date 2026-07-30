@@ -83,11 +83,15 @@ const DB = {
   activeOrgs(){ return this.orgs().filter(o=>o.status==='active'); },
 
   /* onboard a school = create org + its founder login, atomically */
-  onboardSchool({schoolName,orgCode,city,address,founderName,founderEmail,founderPassword,branchName,academicYear,plan}){
+  onboardSchool({schoolName,legalName,orgCode,primaryContactEmail,city,address,founderName,founderEmail,founderPassword,branchName,branchCode,sessionLabel,sessionStartDate,sessionEndDate,academicYear,plan}){
     const org=this.insert(this.COLS.ORGS,{
-      name:schoolName, code:orgCode, city, address:address||'',
-      plan:plan||'Basic', status:'active', students:0,
-      branch:branchName, academicYear,
+      name:schoolName, legal_name:legalName||schoolName, code:orgCode,
+      primary_contact_email:primaryContactEmail||founderEmail,
+      city, address:address||'',
+      plan:plan||'Basic', status:'active', students:0, staff_count:0, branch_count:1,
+      branches:[{branch_code:branchCode||'MAIN',branch_name:branchName||'Main Campus',is_active:true}],
+      branch:branchName, academicYear:academicYear||sessionLabel,
+      session_label:sessionLabel, session_start_date:sessionStartDate, session_end_date:sessionEndDate,
       onboardedAt:new Date().toISOString().split('T')[0],
     });
     const founder=this.insert(this.COLS.FOUNDERS,{
@@ -105,29 +109,40 @@ const DB = {
     return this.getById(this.COLS.ORGS,orgId);
   },
 
-  planCounts(){
+  /* Mirror of OrganizationsSummaryOut (openapi_july_11_a2.json).
+     Claude Code replaces this with GET /platform/organizations/summary  */
+  organizationsSummary(){
     const o=this.orgs();
+    const active_subscriptions_by_plan={BASIC:0,PRO:0,ENTERPRISE:0};
+    o.filter(x=>x.status==='active').forEach(x=>{
+      const key=x.plan.toUpperCase();
+      if(key in active_subscriptions_by_plan) active_subscriptions_by_plan[key]++;
+    });
+    const now=new Date(); const onboarding_trend=[];
+    for(let i=5;i>=0;i--){
+      const d=new Date(now.getFullYear(),now.getMonth()-i,1);
+      const month=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+      const label=d.toLocaleString('en',{month:'short'});
+      const count=o.filter(x=>{ if(!x.onboardedAt)return false; const od=new Date(x.onboardedAt); return od.getFullYear()===d.getFullYear()&&od.getMonth()===d.getMonth(); }).length;
+      onboarding_trend.push({month,label,count});
+    }
+    return {total_organizations:o.length, active_subscriptions_by_plan, onboarding_trend};
+  },
+
+  /* backward compat wrapper */
+  planCounts(){
+    const s=this.organizationsSummary(); const o=this.orgs();
     return {
-      total:o.length,
-      active:o.filter(x=>x.status==='active').length,
-      basic:o.filter(x=>x.plan==='Basic').length,
-      pro:o.filter(x=>x.plan==='Pro').length,
-      enterprise:o.filter(x=>x.plan==='Enterprise').length,
-      proPlus:o.filter(x=>x.plan!=='Basic').length,
-      students:o.reduce((s,x)=>s+(Number(x.students)||0),0),
+      total:s.total_organizations, active:o.filter(x=>x.status==='active').length,
+      basic:s.active_subscriptions_by_plan.BASIC,
+      pro:s.active_subscriptions_by_plan.PRO,
+      enterprise:s.active_subscriptions_by_plan.ENTERPRISE,
+      proPlus:(s.active_subscriptions_by_plan.PRO+s.active_subscriptions_by_plan.ENTERPRISE),
+      students:o.reduce((acc,x)=>acc+(Number(x.students)||0),0),
     };
   },
 
-  /* onboarding trend: counts by month for last 6 months (real, from data) */
-  onboardingTrend(){
-    const months=[]; const now=new Date();
-    for(let i=5;i>=0;i--){ const d=new Date(now.getFullYear(),now.getMonth()-i,1); months.push({key:`${d.getFullYear()}-${d.getMonth()}`,label:d.toLocaleString('en',{month:'short'}),count:0}); }
-    this.orgs().forEach(o=>{
-      if(!o.onboardedAt) return; const d=new Date(o.onboardedAt); const k=`${d.getFullYear()}-${d.getMonth()}`;
-      const m=months.find(x=>x.key===k); if(m) m.count++;
-    });
-    return months;
-  },
+  onboardingTrend(){ return this.organizationsSummary().onboarding_trend; },
 
   _initials(name){ return (name||'?').trim().split(/\s+/).slice(0,2).map(w=>w[0]).join('').toUpperCase(); },
 

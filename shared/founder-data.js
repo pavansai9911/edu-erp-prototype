@@ -693,6 +693,71 @@ const FounderDB = {
 
   /* ---- GET /fees/receipts/{id} — ReceiptOut ---- */
   receiptByPublicId(id){ return (this._get(this.COLS.RECEIPTS)||[]).find(r=>r.public_id===id)||null; },
+
+  /* ---- Staff hierarchy (mirrors GET /staff/hierarchy → StaffHierarchyOut[]) ----
+     StaffHierarchyOut: full_name, designation, hierarchy_level, reporting_to_user_public_id, is_active  */
+  staffHierarchy(){
+    if(typeof StaffDB==='undefined') return [];
+    const staff=StaffDB.staffUsers();
+    // Compute hierarchy_level: level 0 = no reportsToId (top), level 1 = reports to top, etc.
+    const levelMap={};
+    const getLevel=(id,depth=0)=>{
+      if(depth>5) return 0; // guard against cycles
+      if(levelMap[id]!==undefined) return levelMap[id];
+      const u=staff.find(x=>x.id===id); if(!u) return 0;
+      const lvl=u.reportsToId ? getLevel(u.reportsToId,depth+1)+1 : 0;
+      levelMap[id]=lvl; return lvl;
+    };
+    return staff.map(u=>({
+      // StaffHierarchyOut fields
+      public_id:u.id, user_public_id:u.id, full_name:u.name,
+      email:u.email, phone_number:null,
+      branch_public_id:'BR-01', branch_code:'MAIN',
+      employee_code:u.id, designation:u.designation,
+      date_of_joining:u.createdAt||'2026-01-15',
+      employment_type:'full_time',
+      reporting_to_user_public_id:u.reportsToId||null,
+      is_active:u.passwordSet!==false,
+      hierarchy_level:getLevel(u.id),
+    })).sort((a,b)=>a.hierarchy_level-b.hierarchy_level||a.full_name.localeCompare(b.full_name));
+  },
+
+  /* ---- Attendance summary by section — reads real StaffDB data ----
+     Groups all saved attendance marks by section and computes AttendanceSummaryOut-shaped aggregates. */
+  attendanceSummaryBySection(){
+    if(typeof StaffDB==='undefined') return [];
+    const allAtt=StaffDB._get(StaffDB.COLS.ATTENDANCE)||{};
+    const sectionMap={};
+    Object.values(allAtt).forEach(rec=>{
+      if(!rec||!rec.marks) return;
+      Object.entries(rec.marks).forEach(([sid,mark])=>{
+        const stu=this._allStudents().find(s=>s.id===sid); if(!stu) return;
+        const sec=stu.section||'Unknown';
+        if(!sectionMap[sec]) sectionMap[sec]={present_count:0,absent_count:0,late_count:0,half_day_count:0,excused_count:0,total_count:0,section:sec};
+        const s=sectionMap[sec]; s.total_count++;
+        if(mark==='P') s.present_count++;
+        else if(mark==='A') s.absent_count++;
+        else if(mark==='Lt') s.late_count++;
+        else if(mark==='H') s.half_day_count++;
+        else if(mark==='E') s.excused_count++;
+      });
+    });
+    return Object.values(sectionMap).map(s=>({
+      ...s, percentage:s.total_count?Math.round(s.present_count/s.total_count*100):0
+    })).sort((a,b)=>a.section.localeCompare(b.section));
+  },
+
+  /* ---- Admissions funnel — mirrors GET /admissions/funnel-summary → FunnelSummaryEntry[] ----
+     FunnelSummaryEntry: status (string), count (integer)                                         */
+  funnelSummary(){
+    if(typeof StaffDB==='undefined') return [];
+    const stages=['Enquiry','Contacted','Visited','Applied','Admitted'];
+    const counts={};
+    stages.forEach(s=>counts[s]=0);
+    StaffDB.leads().forEach(l=>{ if(counts[l.stage]!==undefined) counts[l.stage]++; });
+    StaffDB.applications().filter(a=>a.status==='Admitted').forEach(()=>{}); // already in leads
+    return stages.map(status=>({status,count:counts[status]||0}));
+  },
   defaulters(){ return this.invoices().filter(i=>i.status!=='Paid').map(i=>({...i,due:i.total-i.paid})).sort((a,b)=>b.due-a.due); },
   attendanceToday(){ const total=this.students().length; const present=Math.round(total*0.92); return {present,absent:total-present,total,pct: total?Math.round(present/total*100):0}; },
 

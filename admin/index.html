@@ -100,7 +100,7 @@ const App = {
         <div class="appbar-sub">${icon('shield')} Platform Console</div>
       </div>
       <button class="appbar-btn" onclick="App.notImplemented('Notifications')" aria-label="Alerts">${icon('bell')}<span class="appbar-dot"></span></button>
-      <div class="appbar-avatar" style="background:${avatarColor(s.name)}" onclick="App.go('settings')">${s.avatar||initials(s.name)}</div>
+      <div class="appbar-avatar" style="background:${avatarColor(s&&s.name?s.name:'Admin')}" onclick="App.go('settings')">${s&&s.avatar?s.avatar:initials(s&&s.name?s.name:'A')}</div>
     </div>`;
   },
 
