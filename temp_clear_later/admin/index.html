@@ -18,6 +18,7 @@
 <script src="../shared/data.js"></script>
 <script src="../shared/auth.js"></script>
 <script src="../shared/utils.js"></script>
+<script src="../shared/auth-screens.js"></script>
 <script>
 /* ============================================================================
    ERP ADMIN — Single Page Application
@@ -48,40 +49,12 @@ const App = {
      LOGIN
      ======================================================================== */
   renderLogin(){
-    document.getElementById('app').innerHTML=`
-    <div class="login fade-in">
-      <div class="login-brand">${icon('logo')}</div>
-      <span class="login-badge">${icon('shield')} Platform Console</span>
-      <h1 class="t-display mb-2">ERP Admin</h1>
-      <p class="text-secondary mb-6">Sign in to onboard schools and manage the platform.</p>
-      <div class="field">
-        <label class="field-label">Email</label>
-        <input class="input" id="email" type="email" value="admin@nextgeneduerp.com" autocomplete="username">
-      </div>
-      <div class="field">
-        <label class="field-label">Password</label>
-        <div class="input-affix">
-          <input class="input" id="pass" type="password" value="demo1234" autocomplete="current-password">
-          <button class="input-group-btn" onclick="App.togglePass(this)" aria-label="Show password">${icon('user')}</button>
-        </div>
-        <div class="field-hint">Platform admins sign in without an organization code.</div>
-      </div>
-      <div id="loginErr"></div>
-      <button class="btn btn-primary btn-full btn-lg mt-2" id="loginBtn" onclick="App.doLogin()">Sign in</button>
-      <p class="t-caption text-center mt-6">Prototype · seeded admin credentials pre-filled</p>
-    </div>`;
-  },
-  togglePass(btn){ const i=btn.previousElementSibling; i.type=i.type==='password'?'text':'password'; },
-  doLogin(){
-    const email=document.getElementById('email').value;
-    const pass=document.getElementById('pass').value;
-    const btn=document.getElementById('loginBtn');
-    btn.textContent='Signing in…'; btn.disabled=true;
-    setTimeout(()=>{
-      const r=Auth.login(email,pass,'admin');
-      if(r.success){ this.route='dashboard'; this.render(); UI.toast('Welcome back, '+r.user.name.split(' ')[0]); }
-      else{ document.getElementById('loginErr').innerHTML=`<div class="field-error mb-2">${icon('alert')} ${r.message}</div>`; btn.textContent='Sign in'; btn.disabled=false; }
-    },500);
+    AuthScreens.Login(document.getElementById('app'),{
+      app:'admin', title:'ERP Admin', subtitle:'Sign in to onboard schools and manage the platform.',
+      badge:'Platform Console', badgeIcon:'shield', orgCodeVisible:false,
+      demoIdentifier:'admin@nextgeneduerp.com', demoPassword:'demo1234',
+      onSuccess:(user)=>{ this.route='dashboard'; this.render(); UI.toast('Welcome back, '+user.name.split(' ')[0]); }
+    });
   },
   logout(){ Auth.logout(); this.renderLogin(); },
 
@@ -160,8 +133,8 @@ const App = {
       <div class="grid-2 mb-3">${'<div class="kpi"><div class="sk sk-line" style="width:50%"></div><div class="sk" style="height:26px;width:40%;margin:8px 0"></div></div>'.repeat(4)}</div>
       <div class="card"><div class="sk" style="height:128px"></div></div>`;
     this.withLoading(el,sk,()=>{
-      const c=DB.planCounts();
-      if(c.total===0){
+      const sum=DB.organizationsSummary();
+      if(sum.total_organizations===0){
         return `<div class="state">
           <div class="state-ill">${icon('building2')}</div>
           <div class="state-title">No schools yet</div>
@@ -169,30 +142,31 @@ const App = {
           <button class="btn btn-primary btn-lg mt-2" onclick="App.go('onboard')">${icon('plus')} Onboard a school</button>
         </div>`;
       }
-      const trend=DB.onboardingTrend(); const max=Math.max(1,...trend.map(t=>t.count));
+      const p=sum.active_subscriptions_by_plan;
+      const activeTotal=p.BASIC+p.PRO+p.ENTERPRISE;
+      const trend=sum.onboarding_trend; const max=Math.max(1,...trend.map(t=>t.count));
+      const recent=DB.orgs().slice(-4).reverse();
       return `
         <div class="grid-2 mb-3">
-          ${this.kpiCard('building','Total schools',c.total,'brand',c.active+' active')}
-          ${this.kpiCard('users','Students',fmt.num(c.students),'info','across all schools')}
+          ${this.kpiCard('building2','Total schools',sum.total_organizations,'brand',activeTotal+' with active subscription')}
+          ${this.kpiCard('shield','Basic',p.BASIC,'neutral','')}
         </div>
         <div class="grid-2 mb-4">
-          ${this.kpiCard('shield','Basic plan',c.basic,'neutral','')}
-          ${this.kpiCard('sparkle','Pro + Ent.',c.proPlus,'success','')}
+          ${this.kpiCard('sparkle','Pro',p.PRO,'success','')}
+          ${this.kpiCard('star','Enterprise',p.ENTERPRISE,'info','')}
         </div>
 
         <div class="card card-raised mb-4">
           <div class="flex between items-center mb-4"><div class="sec-title">Onboarding trend</div><span class="t-caption">Last 6 months</span></div>
-          <div class="chart-bars">
-            ${trend.map(t=>`<div class="bar-col"><div class="bar-val">${t.count||''}</div><div class="bar" style="height:${(t.count/max)*100}%"></div><div class="bar-label">${t.label}</div></div>`).join('')}
-          </div>
+          ${trend.every(t=>t.count===0)
+            ? `<div class="text-center" style="padding:24px;color:var(--text-tertiary)"><div class="mb-2">${icon('chart')}</div><div class="t-caption">Schools onboarded this month will appear here</div></div>`
+            : `<div class="chart-bars">${trend.map(t=>`<div class="bar-col"><div class="bar-val">${t.count||''}</div><div class="bar" style="height:${(t.count/max)*100}%"></div><div class="bar-label">${t.label}</div></div>`).join('')}</div>`}
         </div>
 
         <div class="sec-head"><div class="sec-title">Recent schools</div><button class="sec-link" onclick="App.go('organizations')">View all</button></div>
-        <div class="card card-pad-0"><div class="list">
-          ${DB.orgs().slice(-3).reverse().map(o=>this.orgRow(o)).join('')}
-        </div></div>
+        <div class="card card-pad-0 mb-4"><div class="list">${recent.map(o=>this.orgRow(o)).join('')}</div></div>
 
-        <div class="dashed-card mt-4">${icon('sparkle')} <span class="t-label" style="color:var(--text-tertiary)">AI insights arrive with Enterprise</span></div>
+        <div class="dashed-card">${icon('sparkle')} <span class="t-label" style="color:var(--text-tertiary)">AI platform insights arrive with Enterprise tier</span></div>
       `;
     });
   },
@@ -205,17 +179,32 @@ const App = {
       ${sub?`<div class="kpi-sub">${sub}</div>`:''}
     </div>`;
   },
+  planChip(plan){
+    const p=(plan||'').toUpperCase();
+    return p==='ENTERPRISE'?'chip-info':p==='PRO'?'chip-success':'chip-neutral';
+  },
+  planLabel(plan){ const p=(plan||'').toUpperCase(); return p==='ENTERPRISE'?'Enterprise':p==='PRO'?'Pro':'Basic'; },
   orgRow(o){
-    const chipCls=o.plan==='Enterprise'?'chip-info':o.plan==='Pro'?'chip-success':'chip-neutral';
-    const statusChip=o.status==='active'?'':'<span class="chip chip-danger" style="margin-top:2px">Inactive</span>';
     return `<div class="row" onclick="App.openOrg('${o.id}')">
       <div class="avatar avatar-sq" style="background:${avatarColor(o.name)}">${initials(o.name)}</div>
       <div class="row-main">
         <div class="row-title">${o.name}</div>
         <div class="row-sub">${o.city} · <span class="t-code">${o.code}</span></div>
       </div>
-      <div class="row-trail"><span class="chip ${chipCls}">${o.plan}</span>${statusChip}</div>
+      <div class="row-trail">
+        <span class="chip ${this.planChip(o.plan)}">${this.planLabel(o.plan)}</span>
+        ${o.status!=='active'?'<span class="chip chip-danger" style="margin-top:2px">Inactive</span>':''}
+      </div>
       <span class="row-chev">${icon('chevronR')}</span>
+    </div>`;
+  },
+  /* reusable error state — call when a network/data error occurs on any screen */
+  errorState(msg,retryFn){
+    return `<div class="state">
+      <div class="state-ill err">${icon('alert')}</div>
+      <div class="state-title">Something went wrong</div>
+      <div class="state-msg">${msg||'We couldn\u2019t load this data. Check your connection and try again.'}</div>
+      <button class="btn btn-secondary btn-lg mt-2" onclick="${retryFn||'location.reload()'}">Try again</button>
     </div>`;
   },
 
@@ -224,10 +213,10 @@ const App = {
      ======================================================================== */
   Organizations(el){
     this._backTo='dashboard';
-    const sk=`<div class="sk" style="height:48px;margin-bottom:16px"></div>${'<div class="sk-row"><div class="sk sk-circle"></div><div style="flex:1"><div class="sk sk-line" style="width:60%"></div><div class="sk sk-line" style="width:40%"></div></div></div>'.repeat(5)}`;
-    this.withLoading(el,sk,()=>this.orgsMarkup());
     this._orgFilter=this._orgFilter||'all';
     this._orgSearch=this._orgSearch||'';
+    const sk=`<div class="sk" style="height:48px;margin-bottom:16px"></div><div class="filter-row">${'<div class="sk sk-line" style="width:64px;height:32px;border-radius:99px"></div>'.repeat(4)}</div>${'<div class="sk-row"><div class="sk sk-circle"></div><div style="flex:1"><div class="sk sk-line" style="width:60%"></div><div class="sk sk-line" style="width:40%"></div></div></div>'.repeat(5)}`;
+    this.withLoading(el,sk,()=>this.orgsMarkup());
   },
   orgsMarkup(){
     const all=DB.orgs();
@@ -239,25 +228,56 @@ const App = {
         <button class="btn btn-primary btn-lg mt-2" onclick="App.go('onboard')">${icon('plus')} Onboard a school</button>
       </div>`;
     }
+    // Matches GET /platform/organizations?search=&plan=&status= params exactly
     const f=this._orgFilter||'all'; const q=(this._orgSearch||'').toLowerCase();
     let list=all.filter(o=>{
-      const mf = f==='all'||(f==='active'&&o.status==='active')||(f==='inactive'&&o.status==='inactive')||(o.plan.toLowerCase()===f);
-      const mq = !q||o.name.toLowerCase().includes(q)||o.city.toLowerCase().includes(q)||o.code.toLowerCase().includes(q);
+      const mf = f==='all'
+        || (f==='active' && o.status==='active')
+        || (f==='inactive' && o.status==='inactive')
+        || (o.plan.toUpperCase()===f.toUpperCase());
+      const mq = !q || o.name.toLowerCase().includes(q)
+        || (o.city||'').toLowerCase().includes(q)
+        || (o.code||'').toLowerCase().includes(q);
       return mf&&mq;
     });
-    const filters=[['all','All'],['active','Active'],['basic','Basic'],['pro','Pro'],['enterprise','Enterprise'],['inactive','Inactive']];
+    // Mirrors PlatformOrganizationListMeta fields: total, active_subscriptions
+    const meta={total:all.length, active_subscriptions:all.filter(x=>x.status==='active').length};
+    const filters=[['all','All '+all.length],['active','Active'],['BASIC','Basic'],['PRO','Pro'],['ENTERPRISE','Enterprise'],['inactive','Inactive']];
+    const hasFilter=f!=='all'||q;
     return `
       <div class="input-affix mb-3">
         <span style="position:absolute;left:14px;color:var(--text-tertiary);display:grid">${icon('search')}</span>
-        <input class="input" style="padding-left:42px" placeholder="Search schools, city, code…" value="${this._orgSearch||''}" oninput="App.searchOrgs(this.value)">
+        <input class="input" style="padding-left:42px" placeholder="Search schools, city, code…"
+          value="${this._orgSearch||''}"
+          oninput="App._searchOrgsDebounced(this.value)"
+          id="org-search">
       </div>
-      <div class="filter-row">
+      <div class="filter-row mb-1">
         ${filters.map(([k,l])=>`<button class="filter-chip ${f===k?'active':''}" onclick="App.filterOrgs('${k}')">${l}</button>`).join('')}
       </div>
+      <div class="flex between items-center mb-3">
+        <span class="t-caption">${list.length} of ${meta.total} schools · ${meta.active_subscriptions} active</span>
+        ${hasFilter?`<button class="sec-link" style="background:none;border:none;cursor:pointer" onclick="App.clearOrgFilters()">Clear filters</button>`:''}
+      </div>
       ${list.length===0
-        ? `<div class="state" style="min-height:40vh"><div class="state-ill">${icon('search')}</div><div class="state-title">No matches</div><div class="state-msg">No schools match your search or filter. Try clearing them.</div><button class="btn btn-secondary mt-2" onclick="App.clearOrgFilters()">Clear filters</button></div>`
-        : `<div class="card card-pad-0"><div class="list">${list.map(o=>this.orgRow(o)).join('')}</div></div><p class="t-caption text-center mt-3">${list.length} of ${all.length} schools</p>`}
+        ? `<div class="state" style="min-height:40vh">
+            <div class="state-ill">${icon('search')}</div>
+            <div class="state-title">No matches</div>
+            <div class="state-msg">No schools match "${this._orgSearch||f}". Try a different search term or clear the filter.</div>
+            <button class="btn btn-secondary mt-2" onclick="App.clearOrgFilters()">Clear filters</button>
+          </div>`
+        : `<div class="card card-pad-0""><div class="list">${list.map(o=>this.orgRow(o)).join('')}</div></div>`}
     `;
+  },
+  _searchOrgsDebounced(v){
+    clearTimeout(this._orgSearchTimer);
+    this._orgSearchTimer=setTimeout(()=>{
+      this._orgSearch=v;
+      const el=document.getElementById('screen'); const scroll=el.scrollTop;
+      el.innerHTML=this.orgsMarkup(); el.scrollTop=scroll;
+      const inp=document.getElementById('org-search');
+      if(inp){inp.focus();inp.setSelectionRange(v.length,v.length);}
+    },250);
   },
   searchOrgs(v){ this._orgSearch=v; const el=document.getElementById('screen'); const scroll=el.scrollTop; el.innerHTML=this.orgsMarkup(); el.scrollTop=scroll; const inp=el.querySelector('input'); if(inp){inp.focus();inp.setSelectionRange(v.length,v.length);} },
   filterOrgs(k){ this._orgFilter=k; document.getElementById('screen').innerHTML=this.orgsMarkup(); },
@@ -304,15 +324,38 @@ const App = {
   renderOrgTab(o,t){
     const box=document.getElementById('orgTab');
     if(t==='overview'){
+      // Mirrors PlatformOrganizationDetailOut: display_name, legal_name, org_code,
+      // is_active, onboarded_at, student_count, staff_count, branch_count, branches[]
+      const branches=o.branches||[{branch_code:o.code||'BR-01',branch_name:o.branch||'Main Campus',is_active:true}];
       box.innerHTML=`
         <div class="card mb-4"><div class="dl">
-          <div class="dl-row"><span class="dl-key">Organization code</span><span class="dl-val t-code">${o.code}</span></div>
-          <div class="dl-row"><span class="dl-key">City</span><span class="dl-val">${o.city}</span></div>
-          <div class="dl-row"><span class="dl-key">Branch</span><span class="dl-val">${o.branch||'—'}</span></div>
+          <div class="dl-row"><span class="dl-key">Display name</span><span class="dl-val">${o.name}</span></div>
+          <div class="dl-row"><span class="dl-key">Legal name</span><span class="dl-val">${o.legal_name||o.name}</span></div>
+          <div class="dl-row"><span class="dl-key">Org code</span><span class="dl-val t-code">${o.code}</span></div>
+          <div class="dl-row"><span class="dl-key">City</span><span class="dl-val">${o.city||'—'}</span></div>
           <div class="dl-row"><span class="dl-key">Academic year</span><span class="dl-val">${o.academicYear||'—'}</span></div>
-          <div class="dl-row"><span class="dl-key">Students</span><span class="dl-val t-data">${fmt.num(o.students)}</span></div>
           <div class="dl-row"><span class="dl-key">Onboarded</span><span class="dl-val">${fmt.date(o.onboardedAt)}</span></div>
         </div></div>
+
+        <div class="sec-head"><div class="sec-title">Scale</div></div>
+        <div class="grid-2 mb-4">
+          <div class="kpi">${icon('users')}<div class="kpi-label">Students</div><div class="kpi-value">${fmt.num(o.students||0)}</div></div>
+          <div class="kpi">${icon('briefcase')}<div class="kpi-label">Staff</div><div class="kpi-value">${o.staff_count||0}</div></div>
+        </div>
+        <div class="grid-2 mb-4">
+          <div class="kpi">${icon('building2')}<div class="kpi-label">Branches</div><div class="kpi-value">${o.branch_count||branches.length}</div></div>
+          <div class="kpi">${icon('shield')}<div class="kpi-label">Plan</div><div class="kpi-value" style="font-size:16px">${this.planLabel(o.plan)}</div></div>
+        </div>
+
+        <div class="sec-head"><div class="sec-title">Branches</div></div>
+        <div class="card card-pad-0 mb-4"><div class="list">
+          ${branches.map(b=>`<div class="row" style="cursor:default">
+            <div class="avatar avatar-sq" style="background:var(--brand-subtle);color:var(--brand)">${icon('building2')}</div>
+            <div class="row-main"><div class="row-title">${b.branch_name||b.name||'Branch'}</div><div class="row-sub t-code">${b.branch_code||b.code||'—'}</div></div>
+            <span class="chip ${b.is_active!==false?'chip-success':'chip-neutral'}">${b.is_active!==false?'Active':'Inactive'}</span>
+          </div>`).join('')}
+        </div></div>
+
         <button class="btn ${o.status==='active'?'btn-danger-soft':'btn-primary'} btn-full" onclick="App.toggleOrgStatus('${o.id}')">
           ${icon(o.status==='active'?'ban':'power')} ${o.status==='active'?'Deactivate school':'Reactivate school'}
         </button>`;
@@ -321,7 +364,7 @@ const App = {
       const changes=DB.getBy(DB.COLS.PLANS,'orgId',o.id).reverse();
       box.innerHTML=`
         <div class="card mb-4">
-          <div class="flex between items-center mb-3"><div class="t-h3">Current plan</div><span class="chip ${o.plan==='Enterprise'?'chip-info':o.plan==='Pro'?'chip-success':'chip-neutral'}">${o.plan}</span></div>
+          <div class="flex between items-center mb-3"><div class="t-h3">Current plan</div><span class="chip ${this.planChip(o.plan)}">${this.planLabel(o.plan)}</span></div>
           <p class="t-caption mb-4">${this.planBlurb(o.plan)}</p>
           <button class="btn btn-primary btn-full" onclick="App.openPlanSheet('${o.id}')">${icon('trend')} Change plan</button>
         </div>
@@ -334,40 +377,102 @@ const App = {
         ${changes.length?`<div class="sec-head"><div class="sec-title">Plan history</div></div>
         <div class="card card-pad-0"><div class="list">${changes.map(c=>`<div class="row" style="cursor:default">
           <div class="avatar avatar-sq" style="background:var(--surface-sunken);color:var(--text-secondary)">${icon('trend')}</div>
-          <div class="row-main"><div class="row-title">${c.from} → ${c.to}</div><div class="row-sub">${c.reason||'No note'} · ${fmt.ago(c.createdAt)}</div></div>
+          <div class="row-main"><div class="row-title">${this.planLabel(c.from)} → ${this.planLabel(c.to)}</div><div class="row-sub">${c.reason||'No note'} · ${fmt.ago(c.createdAt)}</div></div>
         </div>`).join('')}</div></div>`:''}
       `;
     }
   },
-  planBlurb(p){ return p==='Basic'?'3 apps: ERP Admin, Founder, Staff. Core operations.':p==='Pro'?'Everything in Basic + the Parent app.':'Everything in Pro + true white-label branding.'; },
+  planBlurb(p){ const pu=(p||'').toUpperCase(); return pu==='ENTERPRISE'?'Everything in Pro + true white-label branding.':pu==='PRO'?'Everything in Basic + the Parent app.':'3 apps: ERP Admin, Founder, Staff. Core operations.'; },
   toggleOrgStatus(id){
     const o=DB.getById(DB.COLS.ORGS,id);
-    UI.confirm({title:o.status==='active'?'Deactivate school?':'Reactivate school?',message:o.status==='active'?`${o.name} will lose access until reactivated.`:`${o.name} will regain access immediately.`,confirmText:o.status==='active'?'Deactivate':'Reactivate',danger:o.status==='active'}).then(ok=>{
-      if(!ok)return; DB.update(DB.COLS.ORGS,id,{status:o.status==='active'?'inactive':'active'});
-      UI.toast('School '+(o.status==='active'?'deactivated':'reactivated')); this.OrgDetail(document.getElementById('screen'));
-    });
+    const isActive=o.status==='active';
+    if(isActive){
+      // deactivate: collect a reason (important operational context)
+      const {close}=UI.sheet(`
+        <div class="sheet-title">Deactivate school?</div>
+        <p class="text-secondary mb-4" style="margin-top:-8px"><b>${o.name}</b> will immediately lose access to all apps. Their data is preserved and the school can be reactivated at any time.</p>
+        <div class="field"><label class="field-label">Reason <span class="req">*</span></label>
+          <select class="select" id="deact-reason">
+            <option value="">Select a reason</option>
+            <option>Non-payment — subscription lapsed</option>
+            <option>School requested suspension</option>
+            <option>Policy violation</option>
+            <option>Duplicate account</option>
+            <option>Other</option>
+          </select>
+        </div>
+        <div id="deact-err"></div>
+        <button class="btn btn-danger-soft btn-full btn-lg mt-2" onclick="App._confirmDeactivate('${id}')">
+          ${icon('ban')} Deactivate
+        </button>
+        <button class="btn btn-secondary btn-full mt-3" onclick="App._deactClose()">Cancel</button>
+      `);
+      this._deactClose=close;
+    }else{
+      UI.confirm({
+        title:'Reactivate school?',
+        message:`${o.name} will immediately regain access to all apps under their current plan.`,
+        confirmText:'Reactivate'
+      }).then(ok=>{
+        if(!ok)return;
+        DB.update(DB.COLS.ORGS,id,{status:'active'});
+        UI.toast(o.name+' reactivated');
+        this.OrgDetail(document.getElementById('screen'));
+      });
+    }
+  },
+  _confirmDeactivate(id){
+    const reason=document.getElementById('deact-reason').value;
+    if(!reason){ document.getElementById('deact-err').innerHTML=`<div class="field-error mb-2">${icon('alert')} Select a reason.</div>`; return; }
+    DB.update(DB.COLS.ORGS,id,{status:'inactive',deactivatedAt:new Date().toISOString(),deactivationReason:reason});
+    this._deactClose&&this._deactClose();
+    const o=DB.getById(DB.COLS.ORGS,id);
+    UI.toast(o.name+' deactivated · '+reason);
+    this.OrgDetail(document.getElementById('screen'));
   },
   openPlanSheet(id){
     const o=DB.getById(DB.COLS.ORGS,id);
-    const plans=[['Basic','3 apps · core operations'],['Pro','+ Parent app'],['Enterprise','+ true white-label']];
+    // plan codes match ChangeSubscriptionRequest{plan_code: string}
+    const plans=[
+      ['BASIC','Basic','3 apps · ERP Admin, Founder, Staff. Core operations.','chip-neutral'],
+      ['PRO','Pro','Everything in Basic, plus the Parent app.','chip-success'],
+      ['ENTERPRISE','Enterprise','Everything in Pro, plus true white-label branding.','chip-info'],
+    ];
+    const cur=o.plan.toUpperCase();
     const {close}=UI.sheet(`
       <div class="sheet-title">Change plan</div>
-      <p class="text-secondary mb-4" style="margin-top:-8px">Changing the plan unlocks tier features for <b>${o.name}</b>.</p>
-      ${plans.map(([p,d])=>`<button class="card card-interactive mb-3 flex between items-center" style="width:100%;text-align:left;border-color:${o.plan===p?'var(--brand)':'var(--border-subtle)'}" onclick="App.applyPlan('${id}','${p}')">
-        <div><div class="row-title">${p}</div><div class="row-sub">${d}</div></div>
-        ${o.plan===p?`<span class="chip chip-brand">Current</span>`:`<span class="row-chev">${icon('chevronR')}</span>`}
-      </button>`).join('')}
+      <p class="text-secondary mb-4" style="margin-top:-8px">Changing the plan is immediate. The school's access tier updates as soon as you confirm.</p>
+      ${plans.map(([code,label,desc,chip])=>`
+        <button class="card card-interactive mb-3 flex between items-center" style="width:100%;text-align:left;${cur===code?'border-color:var(--brand)':''}" onclick="App._confirmPlanChange('${id}','${code}','${label}')">
+          <div>
+            <div class="flex items-center gap-2 mb-1"><div class="row-title">${label}</div><span class="chip ${chip}" style="font-size:11px">${label}</span></div>
+            <div class="row-sub">${desc}</div>
+          </div>
+          ${cur===code?`<span class="chip chip-brand">Current</span>`:`<span class="row-chev">${icon('chevronR')}</span>`}
+        </button>`).join('')}
     `);
     this._planSheetClose=close;
   },
-  applyPlan(id,plan){
+  _confirmPlanChange(id,planCode,planLabel){
     const o=DB.getById(DB.COLS.ORGS,id);
-    if(o.plan===plan){ this._planSheetClose&&this._planSheetClose(); return; }
+    const curLabel=this.planLabel(o.plan);
+    if(o.plan.toUpperCase()===planCode){ this._planSheetClose&&this._planSheetClose(); return; }
+    // close the picker sheet first, then confirm
     this._planSheetClose&&this._planSheetClose();
-    DB.changePlan(id,plan,'Changed via console');
-    UI.toast(`Plan changed to ${plan}`);
-    this.OrgDetail(document.getElementById('screen'));
+    UI.confirm({
+      title:`Switch to ${planLabel}?`,
+      message:`${o.name} will move from ${curLabel} to ${planLabel} immediately. Downgrading may remove access to features currently in use.`,
+      confirmText:`Confirm — switch to ${planLabel}`,
+      danger:planCode==='BASIC'&&o.plan.toUpperCase()!=='BASIC' // downgrade is destructive
+    }).then(ok=>{
+      if(!ok)return;
+      // mirrors PATCH /subscription body: {plan_code: planCode}
+      DB.changePlan(id,planLabel,'Changed via platform console');
+      UI.toast(`Plan changed → ${planLabel}`);
+      this.OrgDetail(document.getElementById('screen'));
+    });
   },
+  applyPlan(id,plan){ this._confirmPlanChange(id,plan.toUpperCase(),plan); }, // legacy alias
 
   /* ========================================================================
      ONBOARD WIZARD  (4 steps, real validation, atomic create)
@@ -375,7 +480,11 @@ const App = {
   Onboard(el){
     this._backTo='dashboard';
     this.ctx.sub=true; this.ctx.title='Onboard school';
-    this.wiz={step:1,data:{plan:'Basic'}};
+    // init with smart defaults so the review step is never half-empty
+    const yr=new Date().getFullYear();
+    this.wiz={step:1,data:{plan:'Basic',branchName:'Main Campus',branchCode:'MAIN',
+      sessionLabel:`${yr}-${String(yr+1).slice(2)}`,
+      sessionStartDate:`${yr}-06-01`, sessionEndDate:`${yr+1}-04-30`}};
     document.querySelector('.appbar')?.remove();
     document.getElementById('app').insertAdjacentHTML('afterbegin',this.AppBar());
     this.renderWizard();
@@ -390,71 +499,147 @@ const App = {
 
     let body='';
     if(s===1){
+      /* Mirrors OnboardOrganizationRequest: display_name, legal_name, org_code,
+         primary_contact_email, country_code (defaulted), timezone (defaulted)    */
       const d=this.wiz.data;
       body=`
-        <div class="field"><label class="field-label">School name <span class="req">*</span></label><input class="input" id="w-name" value="${d.schoolName||''}" placeholder="Sunrise Public School"></div>
-        <div class="field"><label class="field-label">Organization code <span class="req">*</span></label><input class="input t-code" id="w-code" value="${d.orgCode||''}" placeholder="SPS-CHN" style="text-transform:uppercase"><div class="field-hint">A short unique code. Founders use it to log in.</div></div>
-        <div class="field"><label class="field-label">City <span class="req">*</span></label><input class="input" id="w-city" value="${d.city||''}" placeholder="Chennai"></div>
-        <div class="field"><label class="field-label">Address</label><textarea class="textarea" id="w-addr" placeholder="Optional">${d.address||''}</textarea></div>
+        <div class="field"><label class="field-label">School display name <span class="req">*</span></label>
+          <input class="input" id="w-name" value="${d.schoolName||''}" placeholder="Sunrise Public School">
+          <div class="field-hint">The name shown across all apps.</div></div>
+        <div class="field"><label class="field-label">Legal / registered name <span class="req">*</span></label>
+          <input class="input" id="w-legal" value="${d.legalName||''}" placeholder="Sunrise Public School Pvt. Ltd.">
+          <div class="field-hint">The school's official registered name for documents.</div></div>
+        <div class="field"><label class="field-label">Organization code <span class="req">*</span></label>
+          <input class="input t-code" id="w-code" value="${d.orgCode||''}" placeholder="SPS-CHN" style="text-transform:uppercase" oninput="this.value=this.value.toUpperCase()">
+          <div class="field-hint">Short unique code — staff and founders use this to identify their school.</div></div>
+        <div class="field"><label class="field-label">Primary contact email <span class="req">*</span></label>
+          <input class="input" id="w-email" type="email" value="${d.primaryContactEmail||''}" placeholder="info@sunrise.edu">
+          <div class="field-hint">School's general contact email (not the founder's personal email).</div></div>
+        <div class="field"><label class="field-label">City <span class="req">*</span></label>
+          <input class="input" id="w-city" value="${d.city||''}" placeholder="Chennai"></div>
+        <div class="field"><label class="field-label">Address</label>
+          <textarea class="textarea" id="w-addr" placeholder="Optional">${d.address||''}</textarea></div>
       `;
     } else if(s===2){
+      /* Mirrors OnboardOrganizationRequest: founder_full_name, founder_email, founder_password */
       const d=this.wiz.data;
       body=`
-        <p class="text-secondary mb-4">This creates the school owner's login. They can sign in to the Founder app immediately after onboarding.</p>
-        <div class="field"><label class="field-label">Founder name <span class="req">*</span></label><input class="input" id="w-fname" value="${d.founderName||''}" placeholder="Rajesh Kumar"></div>
-        <div class="field"><label class="field-label">Founder email <span class="req">*</span></label><input class="input" id="w-femail" type="email" value="${d.founderEmail||''}" placeholder="rajesh@sunrise.edu"></div>
-        <div class="field"><label class="field-label">Temporary password <span class="req">*</span></label><input class="input" id="w-fpass" value="${d.founderPassword||''}" placeholder="Min 6 characters"><div class="field-hint">The founder can change this after first login.</div></div>
+        <p class="text-secondary mb-4">This creates the school owner's login — they can sign in to the Founder app immediately.</p>
+        <div class="field"><label class="field-label">Founder's full name <span class="req">*</span></label>
+          <input class="input" id="w-fname" value="${d.founderName||''}" placeholder="Rajesh Kumar"></div>
+        <div class="field"><label class="field-label">Founder's login email <span class="req">*</span></label>
+          <input class="input" id="w-femail" type="email" value="${d.founderEmail||''}" placeholder="rajesh@sunrise.edu"></div>
+        <div class="field"><label class="field-label">Temporary password <span class="req">*</span></label>
+          <input class="input" id="w-fpass" type="text" value="${d.founderPassword||''}" placeholder="Min 6 characters">
+          <div class="field-hint">The founder must change this on first login.</div></div>
       `;
     } else if(s===3){
+      /* Mirrors OnboardOrganizationRequest: branch_name, branch_code,
+         session_label, session_start_date, session_end_date, plan_code        */
       const d=this.wiz.data;
       body=`
-        <div class="field"><label class="field-label">First branch name <span class="req">*</span></label><input class="input" id="w-branch" value="${d.branchName||'Main Campus'}" placeholder="Main Campus"></div>
-        <div class="field"><label class="field-label">Academic year <span class="req">*</span></label><input class="input" id="w-year" value="${d.academicYear||'2026-27'}" placeholder="2026-27"></div>
-        <div class="field"><label class="field-label">Subscription plan</label>
+        <div class="sec-head"><div class="sec-title">First branch</div></div>
+        <div class="field"><label class="field-label">Branch name <span class="req">*</span></label>
+          <input class="input" id="w-branch" value="${d.branchName||'Main Campus'}" placeholder="Main Campus"></div>
+        <div class="field"><label class="field-label">Branch code <span class="req">*</span></label>
+          <input class="input t-code" id="w-bcode" value="${d.branchCode||'MAIN'}" placeholder="MAIN" style="text-transform:uppercase" oninput="this.value=this.value.toUpperCase()">
+          <div class="field-hint">Short code used in reports and data exports.</div></div>
+
+        <div class="sec-head"><div class="sec-title">Academic session</div></div>
+        <div class="field"><label class="field-label">Session label <span class="req">*</span></label>
+          <input class="input" id="w-session" value="${d.sessionLabel||''}" placeholder="2026-27"></div>
+        <div class="grid-2">
+          <div class="field"><label class="field-label">Start date <span class="req">*</span></label>
+            <input class="input" id="w-sdate" type="date" value="${d.sessionStartDate||''}"></div>
+          <div class="field"><label class="field-label">End date <span class="req">*</span></label>
+            <input class="input" id="w-edate" type="date" value="${d.sessionEndDate||''}"></div>
+        </div>
+
+        <div class="sec-head"><div class="sec-title">Subscription plan</div></div>
+        <div class="field">
           <div class="segmented" id="w-plan">
             ${['Basic','Pro','Enterprise'].map(p=>`<button class="${(d.plan||'Basic')===p?'active':''}" onclick="App.wizPlan('${p}')">${p}</button>`).join('')}
           </div>
-          <div class="field-hint">${this.planBlurb(d.plan||'Basic')}</div>
+          <div class="field-hint" id="w-plan-hint">${this.planBlurb(d.plan||'Basic')}</div>
         </div>
       `;
     } else {
+      /* Review — mirrors OnboardOrganizationOut fields for what will be created */
       const d=this.wiz.data;
       body=`
-        <p class="text-secondary mb-4">Review before creating. Onboarding creates the school and the founder login together.</p>
+        <p class="text-secondary mb-4">Review everything before creating. This operation creates the school, founder login, branch, and academic session atomically — it cannot be undone.</p>
+        <div class="sec-head"><div class="sec-title">School</div></div>
         <div class="card mb-4"><div class="dl">
-          <div class="dl-row"><span class="dl-key">School</span><span class="dl-val">${d.schoolName}</span></div>
-          <div class="dl-row"><span class="dl-key">Code</span><span class="dl-val t-code">${d.orgCode}</span></div>
-          <div class="dl-row"><span class="dl-key">City</span><span class="dl-val">${d.city}</span></div>
-          <div class="dl-row"><span class="dl-key">Founder</span><span class="dl-val">${d.founderName}</span></div>
-          <div class="dl-row"><span class="dl-key">Founder email</span><span class="dl-val">${d.founderEmail}</span></div>
-          <div class="dl-row"><span class="dl-key">Branch</span><span class="dl-val">${d.branchName}</span></div>
-          <div class="dl-row"><span class="dl-key">Academic year</span><span class="dl-val">${d.academicYear}</span></div>
-          <div class="dl-row"><span class="dl-key">Plan</span><span class="dl-val">${d.plan}</span></div>
+          <div class="dl-row"><span class="dl-key">Display name</span><span class="dl-val">${d.schoolName||'—'}</span></div>
+          <div class="dl-row"><span class="dl-key">Legal name</span><span class="dl-val">${d.legalName||'—'}</span></div>
+          <div class="dl-row"><span class="dl-key">Org code</span><span class="dl-val t-code">${d.orgCode||'—'}</span></div>
+          <div class="dl-row"><span class="dl-key">Contact email</span><span class="dl-val">${d.primaryContactEmail||'—'}</span></div>
+          <div class="dl-row"><span class="dl-key">City</span><span class="dl-val">${d.city||'—'}</span></div>
+        </div></div>
+        <div class="sec-head"><div class="sec-title">Founder login</div></div>
+        <div class="card mb-4"><div class="dl">
+          <div class="dl-row"><span class="dl-key">Name</span><span class="dl-val">${d.founderName||'—'}</span></div>
+          <div class="dl-row"><span class="dl-key">Email</span><span class="dl-val">${d.founderEmail||'—'}</span></div>
+        </div></div>
+        <div class="sec-head"><div class="sec-title">Setup</div></div>
+        <div class="card mb-4"><div class="dl">
+          <div class="dl-row"><span class="dl-key">Branch</span><span class="dl-val">${d.branchName||'—'} <span class="t-code">${d.branchCode||''}</span></span></div>
+          <div class="dl-row"><span class="dl-key">Session</span><span class="dl-val">${d.sessionLabel||'—'}</span></div>
+          <div class="dl-row"><span class="dl-key">Session dates</span><span class="dl-val">${d.sessionStartDate||'—'} → ${d.sessionEndDate||'—'}</span></div>
+          <div class="dl-row"><span class="dl-key">Plan</span><span class="dl-val"><span class="chip ${this.planChip(d.plan)}">${this.planLabel(d.plan)}</span></span></div>
         </div></div>
       `;
     }
     const footer=`<div class="wiz-footer">
       ${s>1?`<button class="btn btn-secondary btn-full" onclick="App.wizBack()">Back</button>`:''}
-      <button class="btn btn-primary btn-full" onclick="App.wizNext()">${s<4?'Continue':'Create school'}</button>
+      <button class="btn btn-primary btn-full" onclick="App.wizNext()">${s<4?'Continue':'Create school & login'}</button>
     </div>`;
     el.innerHTML=`<div class="wiz-flow"><div class="wiz-body">${stepper}<div class="fade-in">${body}</div></div>${footer}</div>`;
   },
-  wizPlan(p){ this.wiz.data.plan=p; document.querySelectorAll('#w-plan button').forEach(b=>b.classList.toggle('active',b.textContent===p)); document.querySelector('#w-plan').nextElementSibling.textContent=this.planBlurb(p); },
+  wizPlan(p){
+    this.wiz.data.plan=p;
+    document.querySelectorAll('#w-plan button').forEach(b=>b.classList.toggle('active',b.textContent===p));
+    const hint=document.getElementById('w-plan-hint');
+    if(hint) hint.textContent=this.planBlurb(p);
+  },
   _saveStep(){
-    const s=this.wiz.step, d=this.wiz.data, g=id=>document.getElementById(id)?.value.trim();
-    if(s===1){ d.schoolName=g('w-name'); d.orgCode=(g('w-code')||'').toUpperCase(); d.city=g('w-city'); d.address=g('w-addr'); }
+    const s=this.wiz.step, d=this.wiz.data, g=id=>{ const el=document.getElementById(id); return el?el.value.trim():''; };
+    if(s===1){
+      d.schoolName=g('w-name'); d.legalName=g('w-legal');
+      d.orgCode=g('w-code').toUpperCase(); d.primaryContactEmail=g('w-email');
+      d.city=g('w-city'); d.address=g('w-addr');
+    }
     if(s===2){ d.founderName=g('w-fname'); d.founderEmail=g('w-femail'); d.founderPassword=g('w-fpass'); }
-    if(s===3){ d.branchName=g('w-branch'); d.academicYear=g('w-year'); }
+    if(s===3){
+      d.branchName=g('w-branch'); d.branchCode=g('w-bcode').toUpperCase();
+      d.sessionLabel=g('w-session'); d.sessionStartDate=g('w-sdate'); d.sessionEndDate=g('w-edate');
+    }
   },
   _validateStep(){
     const s=this.wiz.step, d=this.wiz.data, errs=[];
-    if(s===1){ if(!d.schoolName)errs.push('w-name'); if(!d.orgCode)errs.push('w-code'); if(!d.city)errs.push('w-city');
-      if(d.orgCode && DB.orgs().some(o=>o.code===d.orgCode)){ this._wizErr='That organization code is already in use.'; errs.push('w-code'); } }
-    if(s===2){ if(!d.founderName)errs.push('w-fname');
-      if(!d.founderEmail||!/^\S+@\S+\.\S+$/.test(d.founderEmail)){ errs.push('w-femail'); if(d.founderEmail)this._wizErr='Enter a valid email address.'; }
-      if(d.founderEmail && DB.getAll(DB.COLS.FOUNDERS).some(f=>f.email.toLowerCase()===d.founderEmail.toLowerCase())){ this._wizErr='A founder with that email already exists.'; errs.push('w-femail'); }
-      if(!d.founderPassword||d.founderPassword.length<6){ errs.push('w-fpass'); if(d.founderPassword)this._wizErr='Password must be at least 6 characters.'; } }
-    if(s===3){ if(!d.branchName)errs.push('w-branch'); if(!d.academicYear)errs.push('w-year'); }
+    const emailRe=/^\S+@\S+\.\S+$/;
+    if(s===1){
+      if(!d.schoolName) errs.push('w-name');
+      if(!d.legalName) errs.push('w-legal');
+      if(!d.orgCode){ errs.push('w-code'); }
+      else if(DB.orgs().some(o=>o.code===d.orgCode)){ this._wizErr='That organization code is already taken.'; errs.push('w-code'); }
+      if(!d.primaryContactEmail || !emailRe.test(d.primaryContactEmail)){ errs.push('w-email'); if(d.primaryContactEmail) this._wizErr='Enter a valid contact email.'; }
+      if(!d.city) errs.push('w-city');
+    }
+    if(s===2){
+      if(!d.founderName) errs.push('w-fname');
+      if(!d.founderEmail || !emailRe.test(d.founderEmail)){ errs.push('w-femail'); if(d.founderEmail) this._wizErr='Enter a valid founder email.'; }
+      else if(DB.getAll(DB.COLS.FOUNDERS).some(f=>f.email.toLowerCase()===d.founderEmail.toLowerCase())){ this._wizErr='A founder with that email already exists.'; errs.push('w-femail'); }
+      if(!d.founderPassword || d.founderPassword.length<6){ errs.push('w-fpass'); if(d.founderPassword) this._wizErr='Password must be at least 6 characters.'; }
+    }
+    if(s===3){
+      if(!d.branchName) errs.push('w-branch');
+      if(!d.branchCode) errs.push('w-bcode');
+      if(!d.sessionLabel) errs.push('w-session');
+      if(!d.sessionStartDate) errs.push('w-sdate');
+      if(!d.sessionEndDate) errs.push('w-edate');
+      if(d.sessionStartDate && d.sessionEndDate && d.sessionEndDate<=d.sessionStartDate){ this._wizErr='End date must be after start date.'; errs.push('w-edate'); }
+    }
     return errs;
   },
   wizNext(){
@@ -462,7 +647,7 @@ const App = {
     const errs=this._validateStep();
     if(errs.length){
       errs.forEach(id=>document.getElementById(id)?.classList.add('error'));
-      UI.toast(this._wizErr||'Please complete the required fields','error'); this._wizErr='';
+      UI.toast(this._wizErr||'Please complete the required fields.','error'); this._wizErr='';
       return;
     }
     if(this.wiz.step<4){ this.wiz.step++; this.renderWizard(); }
@@ -473,12 +658,24 @@ const App = {
     const btn=document.querySelector('#screen .btn-primary:last-child');
     if(btn){ btn.textContent='Creating…'; btn.disabled=true; }
     setTimeout(()=>{
-      const {org,founder}=DB.onboardSchool(this.wiz.data);
-      // success screen
+      const d=this.wiz.data;
+      const {org,founder}=DB.onboardSchool({
+        schoolName:d.schoolName, legalName:d.legalName,
+        orgCode:d.orgCode, primaryContactEmail:d.primaryContactEmail,
+        city:d.city, address:d.address,
+        founderName:d.founderName, founderEmail:d.founderEmail, founderPassword:d.founderPassword,
+        branchName:d.branchName, branchCode:d.branchCode,
+        sessionLabel:d.sessionLabel, sessionStartDate:d.sessionStartDate, sessionEndDate:d.sessionEndDate,
+        academicYear:d.sessionLabel, plan:d.plan||'Basic'
+      });
       document.getElementById('screen').innerHTML=`<div class="state fade-in">
         <div class="state-ill pos">${icon('checkCircle')}</div>
         <div class="state-title">${org.name} is live</div>
-        <div class="state-msg">The school is active and <b>${founder.name}</b> can now sign in to the Founder app with <span class="t-code">${founder.email}</span>.</div>
+        <div class="state-msg">
+          <b>${founder.name}</b> can now sign in to the Founder app with
+          <span class="t-code">${founder.email}</span>.
+          Branch <b>${d.branchName}</b> and session <b>${d.sessionLabel}</b> are ready.
+        </div>
         <div class="flex gap-3 mt-4" style="width:100%">
           <button class="btn btn-secondary btn-full" onclick="App.go('dashboard')">Done</button>
           <button class="btn btn-primary btn-full" onclick="App.openOrg('${org.id}')">View school</button>

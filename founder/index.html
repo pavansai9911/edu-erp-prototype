@@ -813,76 +813,132 @@ const App = {
       <button class="btn btn-secondary btn-full" onclick="App.go('invoice',{sub:true,id:'${r.invoiceId||''}'})">${icon('chevronL')} Back to invoice</button>
     `;
   },
+  /* Reports — the BUY centerpiece. Form follows data. Real only. */
   Reports(el){
     this._backTo='dashboard';
-    const sk=`${'<div class="card mb-3"><div class="sk sk-line" style="width:40%"></div><div class="sk sk-line" style="width:70%"></div></div>'.repeat(4)}`;
+    const sk=`${'<div class="card mb-3"><div class="sk sk-line" style="width:40%"></div><div class="sk sk-line" style="width:70%;margin-top:8px"></div></div>'.repeat(4)}`;
     this.withLoading(el,sk,()=>{
       const fs=this.F.feeSummary();
-      if(fs.count===0) return `<div class="state"><div class="state-ill">${icon('chart')}</div><div class="state-title">No data to report yet</div><div class="state-msg">Reports appear here as your school records data. We only show reports backed by real data — never filler.</div></div>`;
+      const hasAtt=this.F.attendanceSummaryBySection().length>0;
+      const hasFunnel=typeof StaffDB!=='undefined'&&StaffDB.leads().length>0;
+      const hasHierarchy=this.F.staffHierarchy().length>0;
+      if(fs.count===0&&!hasAtt&&!hasFunnel){
+        return `<div class="state"><div class="state-ill">${icon('chart')}</div>
+          <div class="state-title">No data to report yet</div>
+          <div class="state-msg">Reports appear here as your school records data — never filler.</div></div>`;
+      }
       const reports=[
-        {id:'collection-trend',ic:'trend',name:'Fee collection over time',desc:'Monthly collection · line trend',form:'Chart'},
-        {id:'by-type',ic:'wallet',name:'Collection by item type',desc:'Tuition vs add-ons · comparison',form:'Comparison'},
-        {id:'defaulters',ic:'alert',name:'Outstanding & defaulters',desc:'Who owes what · table',form:'Table'},
-        {id:'fee-status',ic:'chart',name:'Fee status breakdown',desc:'Paid / partial / unpaid · donut',form:'Chart'},
-        {id:'attendance',ic:'check',name:'Attendance overview',desc:'Section-wise · comparison',form:'Comparison'},
-      ];
-      return `<p class="t-caption mb-4">${icon('sparkle')} Show, don't tell · presentation-grade · export-ready · real data only</p>
+        fs.collected>0 ? {id:'collection-trend',ic:'trend',name:'Fee collection over time',desc:'Monthly trend · bar chart',badge:'Fees'} : null,
+        fs.collected>0 ? {id:'by-type',ic:'wallet',name:'Collection by item type',desc:'Tuition vs add-ons · horizontal bars',badge:'Fees'} : null,
+        fs.count>0    ? {id:'fee-status',ic:'chart',name:'Fee status breakdown',desc:`${fs.paid} paid · ${fs.partial} partial · ${fs.unpaid} unpaid`,badge:'Fees'} : null,
+        fs.count>0    ? {id:'defaulters',ic:'alert',name:'Outstanding & defaulters',desc:'Who owes what · tap to view student',badge:'Fees'} : null,
+        hasAtt        ? {id:'attendance',ic:'check',name:'Attendance by section',desc:'Real marks from Staff app · section summary',badge:'Attendance'} : null,
+        hasFunnel     ? {id:'funnel',ic:'trend',name:'Admissions funnel',desc:'Lead → Contacted → Applied → Admitted',badge:'Admissions'} : null,
+        hasHierarchy  ? {id:'hierarchy',ic:'users',name:'Staff hierarchy',desc:`${this.F.staffHierarchy().length} staff`,badge:'Staff'} : null,
+      ].filter(Boolean);
+      return `<p class="t-caption mb-4">${icon('sparkle')} Presentation-grade · real data only · ${reports.length} reports</p>
         <div class="card card-pad-0"><div class="list">
         ${reports.map(r=>`<div class="row" onclick="App.openReport('${r.id}')">
           <div class="avatar avatar-sq" style="background:var(--brand-subtle);color:var(--brand)">${icon(r.ic)}</div>
           <div class="row-main"><div class="row-title">${r.name}</div><div class="row-sub">${r.desc}</div></div>
-          <div class="row-trail"><span class="chip chip-neutral">${r.form}</span></div>
+          <div class="row-trail"><span class="chip chip-neutral" style="font-size:10px">${r.badge}</span></div>
           <span class="row-chev">${icon('chevronR')}</span>
         </div>`).join('')}
-        </div></div>
-        <p class="t-caption text-center mt-4">Each report renders in the form that fits its data — never forced into a graph.</p>`;
+        </div></div>`;
     });
   },
   openReport(id){ this.go('report',{sub:true,id,title:'Report',_back:'reports'}); },
   ReportView(el){
     this._backTo='reports';
     const id=this.ctx.id;
-    const titles={'collection-trend':'Fee collection over time','by-type':'Collection by item type','defaulters':'Outstanding & defaulters','fee-status':'Fee status breakdown','attendance':'Attendance overview'};
-    this.ctx.title=titles[id]||'Report'; this.ctx.subtitle='Sunrise Public School';
-    this.ctx.action=`<button class="appbar-btn" onclick="App.notImplemented('Export')" aria-label="Export">${icon('chart')}</button>`;
+    const titles={'collection-trend':'Fee collection over time','by-type':'Collection by item type',
+      'defaulters':'Outstanding & defaulters','fee-status':'Fee status breakdown',
+      'attendance':'Attendance by section','funnel':'Admissions funnel','hierarchy':'Staff hierarchy'};
+    this.ctx.title=titles[id]||'Report';
+    this.ctx.subtitle=this.F.settings().schoolName||'School';
     document.querySelector('.appbar')?.remove(); document.getElementById('app').insertAdjacentHTML('afterbegin',this.AppBar());
-    const sk=`<div class="sk" style="height:220px;border-radius:14px"></div>`;
+    const sk=`<div class="sk" style="height:200px;border-radius:14px;margin-bottom:16px"></div><div class="sk" style="height:120px;border-radius:14px"></div>`;
     this.withLoading(el,sk,()=>{
       let body='';
       if(id==='collection-trend'){
-        const trend=this.F.collectionTrend(); const max=Math.max(1,...trend.map(t=>t.amount));
-        body=`<div class="card mb-4"><div class="sec-title mb-4">Monthly collection</div>
-          <div class="chart-bars" style="height:160px">${trend.map(t=>`<div class="bar-col"><div class="bar-val">${t.amount?fmt.moneyShort(t.amount).replace('₹',''):''}</div><div class="bar pos" style="height:${(t.amount/max)*100}%"></div><div class="bar-label">${t.label}</div></div>`).join('')}</div></div>
-          <div class="card"><div class="dl">${trend.filter(t=>t.amount).map(t=>`<div class="dl-row"><span class="dl-key">${t.label}</span><span class="dl-val t-data">${fmt.money(t.amount)}</span></div>`).join('')}</div></div>`;
+        const trend=this.F.collectionTrend(); const nonZero=trend.filter(t=>t.amount>0);
+        if(!nonZero.length) return this._reportEmpty('No payments recorded yet.');
+        const max=Math.max(1,...trend.map(t=>t.amount));
+        const grand=trend.reduce((s,t)=>s+t.amount,0);
+        body=`<div class="card card-raised mb-4">
+          <div class="flex between items-center mb-4"><div class="sec-title">Monthly collection</div><div class="t-data" style="font-weight:700;color:var(--viz-positive)">${fmt.moneyShort(grand)} total</div></div>
+          <div class="chart-bars" style="height:160px">${trend.map(t=>`<div class="bar-col"><div class="bar-val">${t.amount?fmt.moneyShort(t.amount).replace('₹',''):''}</div><div class="bar pos" style="height:${Math.max(2,(t.amount/max)*100)}%"></div><div class="bar-label">${t.label}</div></div>`).join('')}</div></div>
+          <div class="card card-pad-0"><div class="list">${nonZero.map(t=>`<div class="row" style="cursor:default"><div class="row-main"><div class="row-title">${t.label}</div></div><div class="t-data" style="font-weight:700">${fmt.money(t.amount)}</div></div>`).join('')}
+          <div class="row" style="cursor:default;background:var(--surface-sunken)"><div class="flex-1 row-title" style="font-weight:700">Grand total</div><div class="t-data" style="font-weight:800;color:var(--brand)">${fmt.money(grand)}</div></div>
+          </div></div>`;
       } else if(id==='by-type'){
-        const byType=this.F.collectionByType(); const max=Math.max(...byType.map(t=>t.amount));
-        body=`<div class="card"><div class="sec-title mb-1">Tuition vs add-ons</div><p class="t-caption mb-4">The flexible-ledger value: revenue beyond school fees.</p>
-          ${byType.map((t,i)=>`<div class="mb-3"><div class="flex between mb-1"><span class="t-label">${t.type}</span><span class="t-data" style="font-weight:700">${fmt.money(t.amount)}</span></div>
-          <div style="height:10px;background:var(--surface-sunken);border-radius:99px;overflow:hidden"><div style="width:${(t.amount/max)*100}%;height:100%;background:var(--viz-${(i%8)+1});border-radius:99px"></div></div></div>`).join('')}</div>`;
-      } else if(id==='defaulters'){
-        const d=this.F.defaulters();
-        body=`<div class="card card-pad-0"><div class="card-head"><h3>Outstanding by student</h3><span class="chip chip-danger">${d.length}</span></div>
-          <div class="list">${d.map(x=>`<div class="row" onclick="App.openStudent('${x.studentId}')"><div class="avatar" style="background:${avatarColor(x.studentName)}">${initials(x.studentName)}</div>
-          <div class="row-main"><div class="row-title">${x.studentName}</div><div class="row-sub">${x.section} · ${x.status}</div></div>
-          <div class="row-trail"><span class="t-data" style="font-weight:700;color:var(--viz-negative)">${fmt.money(x.due)}</span></div></div>`).join('')}</div></div>`;
+        const byType=this.F.collectionByType();
+        if(!byType.length) return this._reportEmpty('No payment type data available.');
+        const max=Math.max(1,...byType.map(t=>t.amount)); const total=byType.reduce((s,t)=>s+t.amount,0);
+        const colors=['var(--brand)','var(--info)','var(--success)','var(--warning)','var(--danger)'];
+        body=`<div class="card mb-4"><div class="sec-title mb-1">Tuition vs add-ons</div><p class="t-caption mb-4">Every chargeable item, tracked.</p>
+          ${byType.map((t,i)=>`<div class="mb-4"><div class="flex between mb-1"><span class="t-label" style="font-weight:600">${t.type}</span><span class="t-data" style="font-weight:700">${fmt.money(t.amount)} <span class="t-caption">${Math.round(t.amount/total*100)}%</span></span></div>
+          <div style="height:10px;background:var(--surface-sunken);border-radius:99px;overflow:hidden"><div style="width:${(t.amount/max)*100}%;height:100%;background:${colors[i%5]};border-radius:99px"></div></div></div>`).join('')}
+          <div class="dl-row" style="border-top:1px solid var(--border-subtle);padding-top:12px"><span class="dl-key" style="font-weight:700">Total</span><span class="dl-val t-data" style="color:var(--viz-positive)">${fmt.money(total)}</span></div></div>`;
       } else if(id==='fee-status'){
         const fs=this.F.feeSummary();
-        body=this.feeStatusCard(fs)+`<div class="card"><div class="dl">
-          <div class="dl-row"><span class="dl-key">Total billed</span><span class="dl-val t-data">${fmt.money(fs.billed)}</span></div>
+        if(!fs.count) return this._reportEmpty('No invoices generated yet.');
+        const bars=[{label:'Paid',count:fs.paid,pct:Math.round(fs.paid/fs.count*100),color:'var(--viz-positive)'},{label:'Partial',count:fs.partial,pct:Math.round(fs.partial/fs.count*100),color:'var(--viz-warning)'},{label:'Unpaid',count:fs.unpaid,pct:Math.round(fs.unpaid/fs.count*100),color:'var(--viz-negative)'}].filter(b=>b.count>0);
+        body=`<div class="card card-raised mb-4"><div class="sec-title mb-4">Fee status</div>
+          ${bars.map(b=>`<div class="mb-4"><div class="flex between mb-1"><div class="flex items-center gap-2"><div style="width:10px;height:10px;border-radius:50%;background:${b.color}"></div><span class="t-label" style="font-weight:600">${b.label}</span></div><span class="t-data" style="font-weight:700">${b.count} (${b.pct}%)</span></div>
+          <div style="height:12px;background:var(--surface-sunken);border-radius:99px;overflow:hidden"><div style="width:${b.pct}%;height:100%;background:${b.color};border-radius:99px"></div></div></div>`).join('')}</div>
+          <div class="card"><div class="dl"><div class="dl-row"><span class="dl-key">Total billed</span><span class="dl-val t-data">${fmt.money(fs.billed)}</span></div>
           <div class="dl-row"><span class="dl-key">Collected</span><span class="dl-val t-data" style="color:var(--viz-positive)">${fmt.money(fs.collected)}</span></div>
           <div class="dl-row"><span class="dl-key">Outstanding</span><span class="dl-val t-data" style="color:var(--viz-negative)">${fmt.money(fs.outstanding)}</span></div></div></div>`;
+      } else if(id==='defaulters'){
+        const d=this.F.defaulters();
+        if(!d.length) return `<div class="state" style="min-height:40vh"><div class="state-ill" style="color:var(--viz-positive)">${icon('checkCircle')}</div><div class="state-title">All paid up</div><div class="state-msg">No outstanding fees.</div></div>`;
+        body=`<div class="card card-raised mb-3 flex between items-center"><div><div class="t-h3">${d.length} students</div><div class="row-sub">with outstanding</div></div><div class="t-data" style="font-weight:800;color:var(--viz-negative)">${fmt.money(d.reduce((s,x)=>s+x.due,0))}</div></div>
+          <div class="card card-pad-0 mb-4"><div class="list">${d.map(x=>`<div class="row" onclick="App.openStudent('${x.studentId}')"><div class="avatar" style="background:${avatarColor(x.studentName)}">${initials(x.studentName)}</div>
+          <div class="row-main"><div class="row-title">${x.studentName}</div><div class="row-sub">${x.section} · ${x.status}</div></div>
+          <div class="row-trail"><span class="t-data" style="font-weight:700;color:var(--viz-negative)">${fmt.money(x.due)}</span></div><span class="row-chev">${icon('chevronR')}</span></div>`).join('')}</div></div>`;
       } else if(id==='attendance'){
-        const secs={};
-        this.F.students().forEach(s=>{ secs[s.section]=(secs[s.section]||0)+1; });
-        const rows=Object.entries(secs).map(([sec,n])=>({sec,n,pct:85+(sec.charCodeAt(0)%13)}));
-        const max=100;
-        body=`<div class="card"><div class="sec-title mb-4">Attendance by section</div>
-          ${rows.map(r=>`<div class="mb-3"><div class="flex between mb-1"><span class="t-label">${r.sec} <span class="t-caption">(${r.n})</span></span><span class="t-data" style="font-weight:700">${r.pct}%</span></div>
-          <div style="height:8px;background:var(--surface-sunken);border-radius:99px;overflow:hidden"><div style="width:${r.pct}%;height:100%;background:${r.pct>=90?'var(--viz-positive)':r.pct>=80?'var(--viz-warning)':'var(--viz-negative)'};border-radius:99px"></div></div></div>`).join('')}</div>`;
+        const sections=this.F.attendanceSummaryBySection();
+        if(!sections.length) return this._reportEmpty('No attendance marked yet. Teachers mark it in the Staff app using P/A/Late/Half-day/Excused — it appears here in real time.');
+        body=`<div class="sec-head mb-2"><div class="sec-title">By section</div><span class="t-caption">${sections.length} section(s)</span></div>
+          <div class="card mb-4">${sections.map(s=>{
+            const pct=s.percentage; const col=pct>=80?'var(--viz-positive)':pct>=60?'var(--viz-warning)':'var(--viz-negative)';
+            return `<div class="mb-4"><div class="flex between mb-1"><span class="t-label" style="font-weight:600">Section ${s.section}</span><span class="t-data" style="font-weight:700;color:${col}">${pct}%</span></div>
+            <div style="height:10px;background:var(--surface-sunken);border-radius:99px;overflow:hidden;margin-bottom:4px"><div style="width:${pct}%;height:100%;background:${col};border-radius:99px"></div></div>
+            <div class="flex gap-3" style="font-size:11px;color:var(--text-secondary)">
+              <span style="color:var(--viz-positive)">✓ ${s.present_count}</span>
+              ${s.absent_count>0?`<span style="color:var(--viz-negative)">✗ ${s.absent_count}</span>`:''}
+              ${s.late_count>0?`<span style="color:var(--viz-warning)">⏱ ${s.late_count}</span>`:''}
+              <span>${s.total_count} marked</span>
+            </div></div>`;
+          }).join('')}</div>
+          <div class="dashed-card">${icon('shield')} <span class="t-caption">Real cross-app data — marked by teachers in the Staff app.</span></div>`;
+      } else if(id==='funnel'){
+        const funnel=this.F.funnelSummary(); const total=funnel.reduce((s,f)=>s+f.count,0);
+        if(!total) return this._reportEmpty('No admissions leads yet.');
+        const max=Math.max(1,...funnel.map(f=>f.count)); const admitted=funnel.find(f=>f.status==='Admitted');
+        body=`<div class="card card-raised mb-4 flex between items-center"><div><div class="t-h3">${total} leads</div><div class="row-sub">conversion: ${total>0&&admitted?Math.round(admitted.count/total*100):0}%</div></div><div class="t-data" style="font-weight:800;color:var(--viz-positive)">${admitted?.count||0} admitted</div></div>
+          <div class="card mb-4"><div class="sec-title mb-4">Pipeline</div>
+          ${funnel.map(f=>`<div class="mb-4"><div class="flex between mb-1"><span class="t-label" style="font-weight:600">${f.status}</span><span class="t-data" style="font-weight:700">${f.count}</span></div>
+          <div style="height:10px;background:var(--surface-sunken);border-radius:99px;overflow:hidden"><div style="width:${Math.max(2,(f.count/max)*100)}%;height:100%;background:var(--brand);border-radius:99px"></div></div></div>`).join('')}</div>`;
+      } else if(id==='hierarchy'){
+        const hier=this.F.staffHierarchy();
+        if(!hier.length) return this._reportEmpty('No staff added yet.');
+        const dots=['var(--brand)','var(--info)','var(--success)','var(--text-tertiary)'];
+        body=`<div class="card card-pad-0 mb-4"><div class="list">${hier.map(u=>`
+          <div class="row" style="cursor:default;padding-left:${16+u.hierarchy_level*20}px">
+            <div class="avatar" style="width:36px;height:36px;font-size:12px;background:${avatarColor(u.full_name)}">${initials(u.full_name)}</div>
+            <div class="row-main"><div class="row-title" style="font-size:14px">${u.full_name}${u.hierarchy_level===0?' <span class="chip chip-brand" style="font-size:10px">Top level</span>':''}</div>
+            <div class="row-sub">${u.designation}${u.hierarchy_level>0?' · L'+u.hierarchy_level:''}</div></div>
+            <div style="width:8px;height:8px;border-radius:50%;background:${dots[Math.min(u.hierarchy_level,3)]};flex-shrink:0"></div>
+          </div>`).join('')}</div></div>
+          <div class="dashed-card">${icon('shield')} <span class="t-caption">Hierarchy from reporting lines — set when staff are added.</span></div>`;
       }
-      return body+`<button class="btn btn-secondary btn-full mt-4" onclick="App.notImplemented('Export')">${icon('chart')} Export as PDF</button>`;
+      return body+`<button class="btn btn-secondary btn-full mt-4" onclick="App.go('reports')">${icon('chevronL')} Back to reports</button>`;
     });
   },
+  _reportEmpty(msg){ return `<div class="state" style="min-height:40vh"><div class="state-ill">${icon('chart')}</div><div class="state-title">No data yet</div><div class="state-msg">${msg}</div></div>`; },
+
 
   /* MORE — hub for Staff, Setup, Settings */
   More(el){

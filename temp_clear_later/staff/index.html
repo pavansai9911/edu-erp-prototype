@@ -18,6 +18,7 @@
 <script src="../shared/data.js"></script>
 <script src="../shared/auth.js"></script>
 <script src="../shared/utils.js"></script>
+<script src="../shared/auth-screens.js"></script>
 <script src="../shared/founder-data.js"></script>
 <script src="../shared/staff-data.js"></script>
 <script>
@@ -34,8 +35,35 @@ const App = {
   init(){
     const set=this.F.settings();
     this.applyTheme(set.theme||'violet', set.mode||'system');
-    window.matchMedia('(prefers-color-scheme:dark)').addEventListener('change',e=>{this.systemDark=e.matches;const st=this.F.settings();if((st.mode||'system')==='system')this.applyTheme(st.theme,'system');});
-    this.render();
+    window.matchMedia('(prefers-color-scheme:dark)').addEventListener('change',e=>{
+      this.systemDark=e.matches;
+      const st=this.F.settings();
+      if((st.mode||'system')==='system') this.applyTheme(st.theme,'system');
+    });
+    if(!Auth.isLoggedIn()){ this.renderLogin(); } else { this.render(); }
+  },
+  renderLogin(){
+    AuthScreens.Login(document.getElementById('app'),{
+      app:'staff',
+      title:'Staff Portal',
+      subtitle:'Sign in with the credentials your school provided.',
+      badge:'Staff Access',
+      badgeIcon:'shield',
+      orgCodeVisible:false,
+      demoIdentifier:'principal@sunrise.edu',
+      demoPassword:'Welcome@123',
+      onSuccess:(user)=>{
+        // set the active StaffDB user based on who logged in
+        const matched=this.S.staffUsers().find(u=>u.email.toLowerCase()===user.email.toLowerCase());
+        if(matched) this.S.setActiveUser(matched.id);
+        this.render();
+        UI.toast('Welcome back, '+user.name.split(' ')[0]);
+      }
+    });
+  },
+  confirmLogout(){
+    UI.confirm({title:'Sign out?',message:'You will need to sign in again.',confirmText:'Sign out',danger:true})
+      .then(ok=>{ if(ok){ Auth.logout(); this.renderLogin(); } });
   },
   applyTheme(t,m){ document.documentElement.dataset.theme=t; document.documentElement.dataset.mode= m==='system'?(this.systemDark?'dark':'light'):m; },
 
@@ -805,13 +833,15 @@ const App = {
   Settings(el){
     this._backTo='more'; this.ctx.sub=true; this.ctx.title='Settings'; this.ctx.subtitle='Theme & preferences';
     document.querySelector('.appbar')?.remove(); document.getElementById('app').insertAdjacentHTML('afterbegin',this.AppBar());
-    const set=this.F.settings();
-    el.innerHTML=`<div class="card card-pad-0 mb-4"><div class="list">
+    const set=this.F.settings(); const u=this.S.activeUser();
+    el.innerHTML=`
+    <div class="card card-pad-0 mb-4"><div class="list">
       <div class="row" onclick="App.openThemeSheet()"><div class="avatar avatar-sq" style="background:var(--brand-subtle);color:var(--brand)">${icon('palette')}</div><div class="row-main"><div class="row-title" style="font-weight:500">Theme</div><div class="row-sub">${this.themeName(set.theme)} · ${set.mode}</div></div><span class="row-chev">${icon('chevronR')}</span></div>
     </div></div>
-    <button class="btn btn-secondary btn-full mb-3" onclick="App.roleSwitcher()">${icon('users')} Switch staff member (review)</button>
+    <button class="btn btn-secondary btn-full mb-4" onclick="App.roleSwitcher()">${icon('users')} Switch staff member (review only)</button>
     <div class="card card-pad-0 mb-4"><div class="list">
       <div class="row" onclick="App.resetPrompt()"><div class="avatar avatar-sq" style="background:var(--danger-subtle);color:var(--danger)">${icon('trash')}</div><div class="row-main"><div class="row-title" style="font-weight:500;color:var(--danger)">Reset demo data</div><div class="row-sub">Regenerate leads, leaves, attendance & payments</div></div></div>
+      <div class="row" onclick="App.confirmLogout()"><div class="avatar avatar-sq" style="background:var(--danger-subtle);color:var(--danger)">${icon('logout')}</div><div class="row-main"><div class="row-title" style="font-weight:500;color:var(--danger)">Sign out</div><div class="row-sub">${u.name} · ${u.email}</div></div></div>
     </div></div>`;
   },
 
@@ -907,7 +937,7 @@ const App = {
   },
   _addStaffMarkup(editing){
     const d=this._staffDraft;
-    const depts=['Academics','Administration','Finance','Library','Science Lab','Sports','Transport','Counseling'];
+    const depts=typeof FounderDB!=='undefined'&&FounderDB.departmentNames().length>0 ? FounderDB.departmentNames() : ['Academics','Administration','Finance','Science Lab','Sports'];
     const managers=this.S.staffUsers().filter(u=>!editing||u.id!==this.ctx.id);
     const roles=this.S.roles();
     return `
@@ -997,7 +1027,7 @@ const App = {
     }
     if(editing){
       const patch={name:d.name,email:d.email,designation:d.designation,department:d.department,reportsToId:d.reportsToId||null,roleId};
-      if(d.password && d.password!=='••••••••') patch.passwordSet=true;
+      if(d.password && d.password!=='••••••••'){ patch.password=d.password; patch.passwordSet=true; }
       this.S.updateStaff(this.ctx.id,patch);
       UI.toast('Staff updated');
       this.go('staffDetail',{sub:true,id:this.ctx.id,title:'Staff'});

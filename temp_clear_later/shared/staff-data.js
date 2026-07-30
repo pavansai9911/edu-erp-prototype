@@ -122,13 +122,14 @@ const StaffDB = {
     this._set(this.COLS.ROLES,roles);
 
     const roleId=code=>roles.find(r=>r.code===code).id;
+    const DEMO_PW='Welcome@123'; // fixed demo password — no real backend, all seeded staff share it
     const staff=[
-      {id:'USR-01',name:'Anjali Menon',email:'principal@sunrise.edu',designation:'Principal',department:'Administration',reportsToId:null,roleId:roleId('PRINCIPAL'),section:null,avatar:'AM',passwordSet:true},
-      {id:'USR-02',name:'Divya Krishnan',email:'divya@sunrise.edu',designation:'Class Teacher',department:'Academics',reportsToId:'USR-01',roleId:roleId('TEACHER'),section:'3-A',avatar:'DK',passwordSet:true},
-      {id:'USR-03',name:'Ravi Kumar',email:'ravi@sunrise.edu',designation:'Class Teacher',department:'Academics',reportsToId:'USR-01',roleId:roleId('TEACHER'),section:'4-A',avatar:'RK',passwordSet:true},
-      {id:'USR-04',name:'Meera Nair',email:'accounts@sunrise.edu',designation:'Accountant',department:'Finance',reportsToId:'USR-01',roleId:roleId('ACCOUNTANT'),section:null,avatar:'MN',passwordSet:true},
-      {id:'USR-05',name:'Vikram Rao',email:'reception@sunrise.edu',designation:'Front Desk Executive',department:'Administration',reportsToId:'USR-01',roleId:roleId('RECEPTIONIST'),section:null,avatar:'VR',passwordSet:true},
-      {id:'USR-06',name:'Sneha Iyer',email:'sneha@sunrise.edu',designation:'Class Teacher',department:'Academics',reportsToId:'USR-01',roleId:roleId('TEACHER'),section:'5-A',avatar:'SI',passwordSet:true},
+      {id:'USR-01',name:'Anjali Menon',email:'principal@sunrise.edu',password:DEMO_PW,designation:'Principal',department:'Administration',reportsToId:null,roleId:roleId('PRINCIPAL'),section:null,avatar:'AM',passwordSet:true},
+      {id:'USR-02',name:'Divya Krishnan',email:'divya@sunrise.edu',password:DEMO_PW,designation:'Class Teacher',department:'Academics',reportsToId:'USR-01',roleId:roleId('TEACHER'),section:'3-A',avatar:'DK',passwordSet:true},
+      {id:'USR-03',name:'Ravi Kumar',email:'ravi@sunrise.edu',password:DEMO_PW,designation:'Class Teacher',department:'Academics',reportsToId:'USR-01',roleId:roleId('TEACHER'),section:'4-A',avatar:'RK',passwordSet:true},
+      {id:'USR-04',name:'Meera Nair',email:'accounts@sunrise.edu',password:DEMO_PW,designation:'Accountant',department:'Finance',reportsToId:'USR-01',roleId:roleId('ACCOUNTANT'),section:null,avatar:'MN',passwordSet:true},
+      {id:'USR-05',name:'Vikram Rao',email:'reception@sunrise.edu',password:DEMO_PW,designation:'Front Desk Executive',department:'Administration',reportsToId:'USR-01',roleId:roleId('RECEPTIONIST'),section:null,avatar:'VR',passwordSet:true},
+      {id:'USR-06',name:'Sneha Iyer',email:'sneha@sunrise.edu',password:DEMO_PW,designation:'Class Teacher',department:'Academics',reportsToId:'USR-01',roleId:roleId('TEACHER'),section:'5-A',avatar:'SI',passwordSet:true},
     ];
     this._set(this.COLS.STAFF,staff);
 
@@ -191,7 +192,7 @@ const StaffDB = {
   _defaultUserId(){ return 'USR-02'; },
   addStaff({name,email,password,designation,department,reportsToId,roleId,section}){
     const staff=this.staffUsers();
-    const u={id:'USR-'+String(Date.now()).slice(-5),name,email,designation,department:department||'',
+    const u={id:'USR-'+String(Date.now()).slice(-5),name,email,password:password||'',designation,department:department||'',
       reportsToId:reportsToId||null,roleId,section:section||null,avatar:initials(name),passwordSet:!!password,createdAt:new Date().toISOString()};
     staff.push(u); this._set(this.COLS.STAFF,staff); return u;
   },

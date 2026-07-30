@@ -94,7 +94,7 @@ const App = {
   Shell(){
     const tabs=this.computeTabs();
     // if current route not in visible set (e.g. after role switch), redirect to dashboard
-    const routable=[...tabs,...(this._overflowTabs||[])].map(t=>t.k).concat(['more','student','lead','markAttendance','settings','staffList','staffDetail','addStaff','editStaff','roles','roleDetail','selfCheckIn','staffAttendance','academic']);
+    const routable=[...tabs,...(this._overflowTabs||[])].map(t=>t.k).concat(['more','student','lead','markAttendance','settings','staffList','staffDetail','addStaff','editStaff','roles','roleDetail','selfCheckIn','staffAttendance','academic','leaveHistory','applicationDetail','userList','userDetail','auditLog','notifications','dispatchLog']);
     if(!routable.includes(this.route)) this.route='dashboard';
     const isSub=this.ctx.sub;
     return `${this.AppBar()}
@@ -121,7 +121,7 @@ const App = {
     return `<div class="appbar">
       <div class="appbar-logo">${icon('building')}</div>
       <div class="appbar-id"><div class="appbar-title">${titles[this.route]||''}</div><div class="appbar-sub">${icon('shield')} ${sub||role}</div></div>
-      <button class="appbar-btn" onclick="App.notImplemented('Notifications')" aria-label="Alerts">${icon('bell')}<span class="appbar-dot"></span></button>
+      <button class="appbar-btn" onclick="App.go('notifications')" aria-label="Notifications" style="position:relative">${icon('bell')}${this.S&&this.S.unreadCount()>0?`<span class="appbar-dot" style="background:var(--danger)">${this.S.unreadCount()}</span>`:''}</button>
       <div class="appbar-avatar" style="background:${avatarColor(p.name)}" onclick="App.go('more')">${p.avatar}</div>
     </div>`;
   },
@@ -138,6 +138,7 @@ const App = {
       case 'payments': return this.Payments(el);
       case 'admissions': return this.Admissions(el);
       case 'lead': return this.LeadDetail(el);
+      case 'applicationDetail': return this.ApplicationDetail(el);
       case 'approvals': return this.Approvals(el);
       case 'students': return this.Students(el);
       case 'student': return this.StudentDetail(el);
@@ -153,6 +154,12 @@ const App = {
       case 'selfCheckIn': return this.SelfCheckIn(el);
       case 'staffAttendance': return this.StaffAttendance(el);
       case 'academic': return this.AcademicStructure(el);
+      case 'leaveHistory': return this.LeaveHistory(el);
+      case 'userList': return this.UserList(el);
+      case 'userDetail': return this.UserDetail(el);
+      case 'auditLog': return this.AuditLog(el);
+      case 'notifications': return this.Notifications(el);
+      case 'dispatchLog': return this.DispatchLog(el);
     }
   },
   withLoading(el,sk,build){ el.innerHTML=sk; setTimeout(()=>{ el.innerHTML=build(); if(this._after){this._after();this._after=null;} },this.loadingMs); },
@@ -366,7 +373,7 @@ const App = {
         <div class="flex between items-center mb-1"><span class="t-caption">Section ${section}</span><span class="t-caption">${roster.length} total</span></div>
         <div class="att-counts" id="att-counts">${this._countsMarkup(counts)}</div>
       </div>
-      <p class="t-caption mb-3">Everyone's marked <b>Present</b> by default. Tap P / A / L / H / E to change a student.</p>
+      <p class="t-caption mb-3">Everyone's marked <b>Present</b> by default. Tap P / A / Lt / H / E to change a student.</p>
       <div class="card card-pad-0 mb-4"><div class="list" id="roster">
         ${roster.map(s=>this._attRow(s)).join('')}
       </div></div>
@@ -374,8 +381,8 @@ const App = {
   },
   _countsMarkup(counts){
     return this.S.ATT_STATES.map(([code,label,cls])=>{
-      const color = code==='P'?'var(--viz-positive)':code==='A'?'var(--viz-negative)':code==='L'?'var(--viz-warning)':code==='H'?'var(--info)':'var(--text-secondary)';
-      return `<div><div class="t-data-lg" style="color:${color}">${counts[code]}</div><div class="t-caption">${label}</div></div>`;
+      const color = code==='P'?'var(--viz-positive)':code==='A'?'var(--viz-negative)':code==='Lt'?'var(--viz-warning)':code==='H'?'var(--info)':'var(--text-secondary)';
+      return `<div><div class="t-data-lg" style="color:${color}">${counts[code]||0}</div><div class="t-caption">${label}</div></div>`;
     }).join('');
   },
   _attRow(s){
@@ -387,7 +394,7 @@ const App = {
         `<button class="${m===code?'active st-'+code:''}" onclick="App.setMark('${s.id}','${code}')">${code}</button>`).join('')}</div>
     </div>`;
   },
-  _attCounts(){ const c={P:0,A:0,L:0,H:0,E:0}; Object.values(this._marks).forEach(m=>c[m]++); return c; },
+  _attCounts(){ const c={P:0,A:0,Lt:0,H:0,E:0}; Object.values(this._marks).forEach(m=>{ if(m in c) c[m]++; }); return c; },
   setMark(id,state){
     if(this._marks[id]===state) return; // no-op, avoid unnecessary re-render
     this._marks[id]=state;
@@ -576,95 +583,230 @@ const App = {
   },
   filterLeads(s){ this._leadFilter=s; document.getElementById('screen').innerHTML=this.admissionsMarkup(); },
   newLead(){
+    /* mirrors POST /admissions/leads (LeadCreate):
+       enquirer_name (req), enquirer_phone (req), enquirer_email (opt),
+       source_channel (opt), interested_class_level_public_id (opt), assigned_to_user_public_id (opt) */
     this._dupeAck=false;
+    const classLevels=this.S.academic().classLevels||[];
     const {close}=UI.sheet(`
       <div class="sheet-title">New enquiry</div>
-      <div class="field"><label class="field-label">Child's name <span class="req">*</span></label><input class="input" id="nl-child" placeholder="Full name"></div>
-      <div class="field"><label class="field-label">Parent's name <span class="req">*</span></label><input class="input" id="nl-parent" placeholder="Parent / guardian"></div>
-      <div class="field"><label class="field-label">Phone <span class="req">*</span></label><input class="input" id="nl-phone" type="tel" inputmode="tel" placeholder="+91 …"></div>
-      <div class="field"><label class="field-label">Class interested</label>
-        <select class="select" id="nl-class">${['Nursery','LKG','UKG','Class 1','Class 2','Class 3'].map(c=>`<option>${c}</option>`).join('')}</select></div>
-      <div class="field"><label class="field-label">Source</label>
-        <select class="select" id="nl-source">${['Walk-in','Phone','Referral','Website','Social media'].map(c=>`<option>${c}</option>`).join('')}</select></div>
+      <div class="field"><label class="field-label">Enquirer name <span class="req">*</span></label>
+        <input class="input" id="nl-name" placeholder="Parent / guardian name"></div>
+      <div class="field"><label class="field-label">Phone <span class="req">*</span></label>
+        <input class="input" id="nl-phone" type="tel" inputmode="tel" placeholder="+91 …"></div>
+      <div class="field"><label class="field-label">Email</label>
+        <input class="input" id="nl-email" type="email" placeholder="parent@example.com"></div>
+      <div class="field"><label class="field-label">Interested class level</label>
+        <select class="select" id="nl-class">
+          <option value="">— Select —</option>
+          ${classLevels.length>0
+            ? classLevels.map(c=>`<option value="${c.id}">${c.name}</option>`).join('')
+            : ['Nursery','LKG','UKG','Class 1','Class 2','Class 3','Class 4','Class 5','Class 6'].map(c=>`<option value="${c}">${c}</option>`).join('')}
+        </select></div>
+      <div class="field"><label class="field-label">Source channel</label>
+        <select class="select" id="nl-source">
+          <option value="walk_in">Walk-in</option>
+          <option value="phone">Phone call</option>
+          <option value="referral">Referral</option>
+          <option value="website">Website</option>
+          <option value="social_media">Social media</option>
+          <option value="other">Other</option>
+        </select></div>
       <div id="nl-err"></div>
-      <button class="btn btn-primary btn-full btn-lg mt-2" onclick="App.saveLead()">${icon('check')} Capture lead</button>
+      <button class="btn btn-primary btn-full btn-lg mt-2" onclick="App.saveLead()">${icon('check')} Capture enquiry</button>
     `);
     this._leadClose=close;
   },
   saveLead(){
-    const g=id=>document.getElementById(id).value.trim();
-    const child=g('nl-child'), parent=g('nl-parent'), phone=g('nl-phone');
-    if(!child||!parent||!phone){ document.getElementById('nl-err').innerHTML=`<div class="field-error mb-2">${icon('alert')} Name, parent and phone are required.</div>`; return; }
-    // soft duplicate check — same phone already in the pipeline (parent enquired twice)
-    const digits=phone.replace(/\D/g,'').slice(-10);
-    const dupe=this.S.leads().find(l=>l.phone.replace(/\D/g,'').slice(-10)===digits && digits.length>=10);
+    const g=id=>document.getElementById(id)?.value.trim()||'';
+    const enquirer_name=g('nl-name'), enquirer_phone=g('nl-phone');
+    const err=document.getElementById('nl-err');
+    if(!enquirer_name||!enquirer_phone){ err.innerHTML=`<div class="field-error mb-2">${icon('alert')} Name and phone are required.</div>`; return; }
+    // Soft duplicate check on phone
+    const digits=enquirer_phone.replace(/\D/g,'').slice(-10);
+    const dupe=this.S.leads().find(l=>(l.enquirer_phone||l.phone||'').replace(/\D/g,'').slice(-10)===digits && digits.length>=10);
     if(dupe && !this._dupeAck){
-      document.getElementById('nl-err').innerHTML=`<div class="field-error mb-2">${icon('alert')} A lead with this phone already exists: <b>${dupe.childName}</b> (${dupe.stage}). Tap Capture again to add anyway.</div>`;
+      err.innerHTML=`<div class="field-error mb-2">${icon('alert')} Phone already in pipeline: <b>${dupe.enquirer_name||dupe.childName}</b> (${dupe.stage}). Tap again to add anyway.</div>`;
       this._dupeAck=true; return;
     }
     this._dupeAck=false;
-    this.S.addLead({childName:child,parentName:parent,phone,classInterested:g('nl-class'),source:g('nl-source')});
+    this.S.addLead({
+      enquirer_name, enquirer_phone,
+      enquirer_email:g('nl-email')||null,
+      interested_class_level_public_id:g('nl-class')||null,
+      source_channel:g('nl-source')||'walk_in',
+    });
     this._leadClose&&this._leadClose();
     if(this.route!=='admissions') this.go('admissions'); else document.getElementById('screen').innerHTML=this.admissionsMarkup();
-    UI.toast('Lead captured');
+    UI.toast('Enquiry captured');
   },
   openLead(id){ this.go('lead',{sub:true,id,title:'Lead',_back:'admissions'}); },
   LeadDetail(el){
     const l=this.S.leadById(this.ctx.id); if(!l){ el.innerHTML='<div class="state"><div class="state-title">Not found</div></div>'; return; }
     this._backTo='admissions';
-    this.ctx.title=l.childName; this.ctx.subtitle=l.classInterested+' · '+l.stage;
+    this.ctx.title=l.enquirer_name||l.childName; this.ctx.subtitle=(l.interested_class_level_public_id||l.classInterested||'—')+' · '+l.stage;
     document.querySelector('.appbar')?.remove(); document.getElementById('app').insertAdjacentHTML('afterbegin',this.AppBar());
-    const stages=['Enquiry','Contacted','Visited','Applied','Admitted']; const idx=stages.indexOf(l.stage);
+    /* 10 lead stages mapped to API status enum (TransitionRequest.to_status applied to the lead's linked application) */
+    const LEAD_PIPELINE=[
+      {stage:'Enquiry',   api:'inquiry',               color:'chip-neutral'},
+      {stage:'Contacted', api:'counselling',            color:'chip-info'},
+      {stage:'Visited',   api:'document_verification',  color:'chip-warning'},
+      {stage:'Applied',   api:'interview',              color:'chip-brand'},
+      {stage:'Admitted',  api:'admitted',               color:'chip-success'},
+      {stage:'Waitlisted',api:'waiting_list',           color:'chip-warning'},
+      {stage:'Rejected',  api:'rejected',               color:'chip-danger'},
+      {stage:'Cancelled', api:'cancelled',              color:'chip-neutral'},
+    ];
+    const idx=LEAD_PIPELINE.findIndex(p=>p.stage===l.stage);
+    const canCreate=this.S.can(this.S.PERMS.LEAD_CREATE);
     const canApprove=this.S.can(this.S.PERMS.APPLICATION_APPROVE);
-    const app=this.S.applicationForLead(l.id);
-    // Build the stage-action block: free advance up to Visited; Visited->Applied SUBMITS an
-    // application; Applied->Admitted is NEVER a free button — only the Approvals decision moves it.
-    let stageAction;
-    if(l.stage==='Admitted'){
-      stageAction=`<div class="dashed-card mt-4" style="border-color:var(--viz-positive);color:var(--viz-positive)">${icon('checkCircle')} Admitted</div>`;
-    }else if(l.stage==='Applied'){
-      if(app&&app.status==='Rejected') stageAction=`<div class="dashed-card mt-4" style="border-color:var(--danger);color:var(--danger)">${icon('alert')} Application rejected</div>`;
-      else if(app&&app.status==='Waitlisted') stageAction=`<div class="dashed-card mt-4" style="border-color:var(--warning);color:var(--warning)">${icon('clock')} Waitlisted</div>`;
-      else if(canApprove) stageAction=`<button class="btn btn-primary btn-full mt-4" onclick="App.go('approvals')">${icon('inbox')} Review application in Approvals</button>`;
-      else stageAction=`<div class="dashed-card mt-4">${icon('shield')} <span class="t-caption">Application submitted — awaiting the Principal's decision.</span></div>`;
+    const app=this.S.applicationForLead(l.public_id||l.id);
+    const terminalStages=new Set(['Admitted','Waitlisted','Rejected','Cancelled','Transferred']);
+    // Build the stage action
+    let stageAction='';
+    if(terminalStages.has(l.stage)){
+      const colors={Admitted:'viz-positive',Rejected:'viz-negative',Waitlisted:'viz-warning',Cancelled:'text-tertiary'};
+      const icns={Admitted:'checkCircle',Rejected:'alert',Waitlisted:'clock',Cancelled:'ban'};
+      stageAction=`<div class="dashed-card mt-3" style="color:var(--${colors[l.stage]||'text-secondary'})">${icon(icns[l.stage]||'check')} ${l.stage}</div>`;
+      if(app) stageAction+=`<button class="btn btn-secondary btn-full mt-3" onclick="App.go('applicationDetail',{sub:true,id:'${app.public_id||app.id}'})">View application →</button>`;
+    }else if(l.stage==='Applied'&&app){
+      stageAction=`<button class="btn btn-secondary btn-full mt-3" onclick="App.go('applicationDetail',{sub:true,id:'${app.public_id||app.id}'})">${icon('trend')} Open application</button>`;
+      if(canApprove) stageAction+=`<button class="btn btn-primary btn-full mt-2" onclick="App.go('applicationDetail',{sub:true,id:'${app.public_id||app.id}'})">${icon('inbox')} Review & decide</button>`;
     }else if(l.stage==='Visited'){
-      stageAction=this.S.can(this.S.PERMS.LEAD_CREATE)
-        ? `<button class="btn btn-primary btn-full mt-4" onclick="App.submitApplication('${l.id}')">${icon('trend')} Submit application</button>`
-        : `<div class="dashed-card mt-4">${icon('shield')} <span class="t-caption">Only Admissions staff can submit an application.</span></div>`;
-    }else{
-      stageAction=`<button class="btn btn-primary btn-full mt-4" onclick="App.advanceLead('${l.id}','${stages[idx+1]}')">${icon('trend')} Move to ${stages[idx+1]}</button>`;
+      stageAction=canCreate
+        ? `<button class="btn btn-primary btn-full mt-3" onclick="App.showConvertSheet('${l.public_id||l.id}')">${icon('trend')} Convert to application</button>`
+        : `<div class="dashed-card mt-3">${icon('shield')} <span class="t-caption">Only Admissions staff can convert an enquiry to a formal application.</span></div>`;
+    }else if(idx>=0 && idx<LEAD_PIPELINE.length-1 && !terminalStages.has(LEAD_PIPELINE[idx+1]?.stage)){
+      const next=LEAD_PIPELINE[idx+1];
+      stageAction=`<button class="btn btn-primary btn-full mt-3" onclick="App.advanceLead('${l.public_id||l.id}','${next.stage}')">${icon('trend')} Move to ${next.stage}</button>`;
     }
     el.innerHTML=`
+      <div class="sec-head"><div class="sec-title">Enquiry details</div><span class="t-caption">LeadOut fields</span></div>
       <div class="card mb-4"><div class="dl">
-        <div class="dl-row"><span class="dl-key">Parent</span><span class="dl-val">${l.parentName}</span></div>
-        <div class="dl-row"><span class="dl-key">Phone</span><span class="dl-val">${l.phone}</span></div>
-        <div class="dl-row"><span class="dl-key">Class</span><span class="dl-val">${l.classInterested}</span></div>
-        <div class="dl-row"><span class="dl-key">Source</span><span class="dl-val">${l.source}</span></div>
+        <div class="dl-row"><span class="dl-key">Enquirer</span><span class="dl-val">${l.enquirer_name||l.childName||'—'}</span></div>
+        <div class="dl-row"><span class="dl-key">Phone</span><span class="dl-val">${l.enquirer_phone||l.phone||'—'}</span></div>
+        ${(l.enquirer_email)?`<div class="dl-row"><span class="dl-key">Email</span><span class="dl-val">${l.enquirer_email}</span></div>`:''}
+        <div class="dl-row"><span class="dl-key">Class interested</span><span class="dl-val">${l.interested_class_level_public_id||l.classInterested||'—'}</span></div>
+        <div class="dl-row"><span class="dl-key">Source</span><span class="dl-val">${(l.source_channel||l.source||'—').replace('_',' ')}</span></div>
         <div class="dl-row"><span class="dl-key">Captured</span><span class="dl-val">${fmt.ago(l.createdAt)}</span></div>
       </div></div>
-      <div class="sec-head"><div class="sec-title">Stage</div></div>
+      <div class="sec-head"><div class="sec-title">Pipeline stage</div></div>
       <div class="card mb-4">
-        <div class="flex gap-2" style="flex-wrap:wrap">${stages.map((st,i)=>`<span class="chip ${i<=idx?'chip-brand':'chip-neutral'}">${st}</span>`).join('')}</div>
+        <div class="flex gap-2" style="flex-wrap:wrap;margin-bottom:12px">
+          ${LEAD_PIPELINE.slice(0,5).map(p=>`<span class="chip ${l.stage===p.stage?p.color:'chip-neutral'}">${p.stage}</span>`).join('')}
+        </div>
         ${stageAction}
       </div>
-      <button class="btn btn-secondary btn-full mb-3" onclick="App.addLeadNote('${l.id}')">${icon('edit')} Add note / follow-up</button>
-      ${l.notes.length?`<div class="sec-head"><div class="sec-title">Notes</div></div><div class="card card-pad-0"><div class="list">${l.notes.map(n=>`<div class="row" style="cursor:default"><div class="row-main"><div class="row-title" style="font-weight:400">${n.text}</div><div class="row-sub">${fmt.ago(n.at)}</div></div></div>`).join('')}</div></div>`:''}
+      <button class="btn btn-secondary btn-full mb-3" onclick="App.addLeadNote('${l.public_id||l.id}')">${icon('edit')} Add note / follow-up</button>
+      ${(l.notes||[]).length?`<div class="sec-head"><div class="sec-title">Notes</div></div><div class="card card-pad-0"><div class="list">${l.notes.map(n=>`<div class="row" style="cursor:default"><div class="row-main"><div class="row-title" style="font-weight:400">${n.text}</div><div class="row-sub">${fmt.ago(n.at)}</div></div></div>`).join('')}</div></div>`:''}
     `;
   },
   advanceLead(id,stage){ this.S.moveLeadStage(id,stage); this.LeadDetail(document.getElementById('screen')); UI.toast('Moved to '+stage); },
-  submitApplication(id){
-    this.S.convertLead(id); // creates the linked application record atomically
-    this.LeadDetail(document.getElementById('screen'));
-    this._refreshBadges();
-    UI.toast('Application submitted — sent to Approvals');
-  },
   addLeadNote(id){
     const {close}=UI.sheet(`<div class="sheet-title">Add note</div>
-      <div class="field"><textarea class="textarea" id="ln-note" placeholder="Follow-up notes, call summary…"></textarea></div>
+      <div class="field"><textarea class="textarea" id="ln-note" placeholder="Follow-up notes, call summary…" rows="4"></textarea></div>
       <button class="btn btn-primary btn-full" onclick="App.saveLeadNote('${id}')">Save note</button>`);
     this._noteClose=close;
   },
   saveLeadNote(id){ const t=document.getElementById('ln-note').value.trim(); if(t){ this.S.addLeadNote(id,t); } this._noteClose&&this._noteClose(); this.LeadDetail(document.getElementById('screen')); if(t)UI.toast('Note added'); },
+
+  /* Shows the ConvertLeadRequest form before calling POST /leads/{id}/convert */
+  showConvertSheet(leadId){
+    const l=this.S.leadById(leadId); if(!l) return;
+    const {close}=UI.sheet(`
+      <div class="sheet-title">Convert to application</div>
+      <p class="text-secondary mb-4" style="margin-top:-8px">This creates a formal admission application (mirrors POST /leads/{id}/convert → ConvertLeadRequest).</p>
+      <div class="field"><label class="field-label">Applicant full name <span class="req">*</span></label>
+        <input class="input" id="cv-name" value="${l.enquirer_name||l.childName||''}" placeholder="Child's full name"></div>
+      <div class="field"><label class="field-label">Date of birth</label>
+        <input class="input" id="cv-dob" type="date" placeholder="YYYY-MM-DD"></div>
+      <div class="field"><label class="field-label">Guardian name <span class="req">*</span></label>
+        <input class="input" id="cv-gname" value="${l.parentName||l.enquirer_name||''}" placeholder="Guardian name"></div>
+      <div class="field"><label class="field-label">Guardian phone <span class="req">*</span></label>
+        <input class="input" id="cv-gphone" value="${l.enquirer_phone||l.phone||''}" type="tel" inputmode="tel"></div>
+      <div id="cv-err"></div>
+      <button class="btn btn-primary btn-full btn-lg mt-3" onclick="App._doConvert('${leadId}')">${icon('trend')} Submit application</button>
+    `);
+    this._cvClose=close;
+  },
+  _doConvert(leadId){
+    const name=document.getElementById('cv-name').value.trim();
+    const gname=document.getElementById('cv-gname').value.trim();
+    const gphone=document.getElementById('cv-gphone').value.trim();
+    const err=document.getElementById('cv-err');
+    if(!name||!gname||!gphone){ err.innerHTML=`<div class="field-error mb-2">${icon('alert')} Name, guardian name and phone are required.</div>`; return; }
+    const app=this.S.convertLead(leadId,{
+      applicant_full_name:name,
+      applicant_date_of_birth:document.getElementById('cv-dob').value||null,
+      guardian_name:gname, guardian_phone:gphone,
+    });
+    this._cvClose&&this._cvClose();
+    this._refreshBadges();
+    UI.toast('Application created — sent to Approvals');
+    this.LeadDetail(document.getElementById('screen'));
+  },
+  submitApplication(id){ this.showConvertSheet(id); }, // compat alias
+
+  /* APPLICATION DETAIL — shows ApplicationOut fields + TransitionRequest actions */
+  ApplicationDetail(el){
+    const a=this.S.applicationById(this.ctx.id);
+    if(!a){ el.innerHTML='<div class="state"><div class="state-title">Not found</div></div>'; return; }
+    this._backTo='admissions';
+    this.ctx.title=a.applicant_full_name||a.childName; this.ctx.subtitle=a.application_code;
+    document.querySelector('.appbar')?.remove(); document.getElementById('app').insertAdjacentHTML('afterbegin',this.AppBar());
+    const canApprove=this.S.can(this.S.PERMS.APPLICATION_APPROVE);
+    /* TransitionRequest.to_status enum — the 10 statuses */
+    const ALL_STATUSES=['lead','inquiry','counselling','document_verification','interview','admitted','waiting_list','rejected','cancelled','transferred'];
+    const statusChip={admitted:'chip-success',rejected:'chip-danger',waiting_list:'chip-warning',interview:'chip-brand',inquiry:'chip-neutral',counselling:'chip-info',document_verification:'chip-info',cancelled:'chip-neutral',transferred:'chip-neutral',lead:'chip-neutral'};
+    const displayName={admitted:'Admitted',rejected:'Rejected',waiting_list:'Waitlisted',interview:'Under Review',inquiry:'Inquiry',counselling:'Counselling',document_verification:'Docs Verification',cancelled:'Cancelled',transferred:'Transferred',lead:'Lead'};
+    const terminal=new Set(['admitted','rejected','cancelled','transferred']);
+    el.innerHTML=`
+      <div class="card card-raised mb-4">
+        <div class="flex between items-center mb-3">
+          <div><div class="t-h3">${a.applicant_full_name||a.childName}</div><div class="row-sub t-code">${a.application_code}</div></div>
+          <span class="chip ${statusChip[a.status]||'chip-neutral'}">${displayName[a.status]||a.status}</span>
+        </div>
+        <div class="dl">
+          <div class="dl-row"><span class="dl-key">Class applied</span><span class="dl-val">${a.applying_class_level_public_id||a.classApplied||'—'}</span></div>
+          <div class="dl-row"><span class="dl-key">Session</span><span class="dl-val">${a.applying_academic_session_public_id||'—'}</span></div>
+          ${a.applicant_date_of_birth?`<div class="dl-row"><span class="dl-key">Date of birth</span><span class="dl-val">${fmt.date(a.applicant_date_of_birth)}</span></div>`:''}
+          <div class="dl-row"><span class="dl-key">Guardian</span><span class="dl-val">${a.guardian_name||a.parentName||'—'}</span></div>
+          <div class="dl-row"><span class="dl-key">Phone</span><span class="dl-val">${a.guardian_phone||a.phone||'—'}</span></div>
+          ${a.guardian_email?`<div class="dl-row"><span class="dl-key">Email</span><span class="dl-val">${a.guardian_email}</span></div>`:''}
+          ${a.interview_score!==null&&a.interview_score!==undefined?`<div class="dl-row"><span class="dl-key">Interview score</span><span class="dl-val t-data">${a.interview_score}</span></div>`:''}
+          ${a.waiting_list_rank!==null&&a.waiting_list_rank!==undefined?`<div class="dl-row"><span class="dl-key">Waiting list rank</span><span class="dl-val t-data">#${a.waiting_list_rank}</span></div>`:''}
+          ${a.decision_notes?`<div class="dl-row"><span class="dl-key">Notes</span><span class="dl-val">${a.decision_notes}</span></div>`:''}
+        </div>
+      </div>
+
+      ${canApprove&&!terminal.has(a.status)?`
+        <div class="sec-head"><div class="sec-title">Transition</div><span class="t-caption">POST /applications/{id}/transition</span></div>
+        <div class="card card-pad-0 mb-4"><div class="list">
+          ${['admitted','waiting_list','rejected','cancelled'].map(toStatus=>{
+            const colors={admitted:'var(--viz-positive)',waiting_list:'var(--viz-warning)',rejected:'var(--viz-negative)',cancelled:'var(--text-tertiary)'};
+            const labels={admitted:'Admit student',waiting_list:'Add to waitlist',rejected:'Reject application',cancelled:'Cancel application'};
+            return `<div class="row" onclick="App._doTransition('${a.public_id||a.id}','${toStatus}')">
+              <div class="avatar avatar-sq" style="background:var(--surface-sunken);color:${colors[toStatus]}">${icon(toStatus==='admitted'?'checkCircle':toStatus==='rejected'?'alert':'clock')}</div>
+              <div class="row-main"><div class="row-title" style="color:${colors[toStatus]}">${labels[toStatus]}</div>
+                <div class="row-sub">Sets status → <span class="t-code">${toStatus}</span></div></div>
+              <span class="row-chev">${icon('chevronR')}</span></div>`;
+          }).join('')}
+        </div></div>
+        <div class="field"><label class="field-label">Decision notes (optional)</label>
+          <textarea class="textarea" id="app-notes" placeholder="Reason or follow-up instructions" rows="3">${a.decision_notes||''}</textarea></div>
+        <br>
+      `:`${terminal.has(a.status)?`<div class="dashed-card" style="color:var(--${a.status==='admitted'?'viz-positive':a.status==='rejected'?'viz-negative':'text-tertiary'})">${icon(a.status==='admitted'?'checkCircle':'alert')} Application ${displayName[a.status]||a.status}</div>`
+      :`<div class="dashed-card">${icon('shield')} <span class="t-caption">Only the Principal can approve or reject applications.</span></div>`}`}
+    `;
+  },
+  _doTransition(id,toStatus){
+    const notes=document.getElementById('app-notes')?.value.trim()||null;
+    this.S.transitionApplication(id,{to_status:toStatus,remarks:notes});
+    this._refreshBadges();
+    const statusMsg={admitted:'Application admitted!',rejected:'Application rejected',waiting_list:'Added to waiting list',cancelled:'Application cancelled'};
+    UI.toast(statusMsg[toStatus]||'Status updated');
+    this.ApplicationDetail(document.getElementById('screen'));
+  },
 
   /* ========================================================================
      APPROVALS (Principal) — the attention inbox
@@ -681,29 +823,62 @@ const App = {
       let html='';
       if(apps.length){ html+=`<div class="sec-head"><div class="sec-title">Admission applications</div><span class="chip chip-warning">${apps.length}</span></div>`;
         html+=apps.map(a=>`<div class="card mb-3">
-          <div class="flex gap-3 items-center mb-3"><div class="avatar" style="background:${avatarColor(a.childName)}">${initials(a.childName)}</div>
-          <div class="flex-1"><div class="row-title">${a.childName}</div><div class="row-sub">${a.classApplied} · ${a.parentName}</div></div></div>
-          <div class="flex gap-2"><button class="btn btn-danger-soft btn-full btn-sm" onclick="App.decideApp('${a.id}','Rejected')">Reject</button>
-          <button class="btn btn-secondary btn-full btn-sm" onclick="App.decideApp('${a.id}','Waitlisted')">Waitlist</button>
-          <button class="btn btn-primary btn-full btn-sm" onclick="App.decideApp('${a.id}','Admitted')">Admit</button></div>
+          <div class="flex gap-3 items-center mb-3">
+            <div class="avatar" style="background:${avatarColor(a.applicant_full_name||a.childName)}">${initials(a.applicant_full_name||a.childName)}</div>
+            <div class="flex-1">
+              <div class="row-title">${a.applicant_full_name||a.childName}</div>
+              <div class="row-sub">${a.applying_class_level_public_id||a.classApplied||'—'} · <span class="t-code">${a.application_code||a.id}</span></div>
+            </div>
+          </div>
+          <div class="flex gap-2">
+            <button class="btn btn-danger-soft btn-full btn-sm" onclick="App.decideApp('${a.public_id||a.id}','rejected')">Reject</button>
+            <button class="btn btn-secondary btn-full btn-sm" onclick="App.decideApp('${a.public_id||a.id}','waiting_list')">Waitlist</button>
+            <button class="btn btn-primary btn-full btn-sm" onclick="App.decideApp('${a.public_id||a.id}','admitted')">Admit</button>
+          </div>
+          <button class="btn btn-secondary btn-full btn-sm mt-2" onclick="App.go('applicationDetail',{sub:true,id:'${a.public_id||a.id}'})">View full application →</button>
         </div>`).join('');
       }
       if(leaves.length){ html+=`<div class="sec-head"><div class="sec-title">Leave requests</div><span class="chip chip-warning">${leaves.length}</span></div>`;
-        html+=leaves.map(l=>`<div class="card mb-3">
-          <div class="flex gap-3 items-center mb-2"><div class="avatar" style="background:${avatarColor(l.staffName)}">${initials(l.staffName)}</div>
-          <div class="flex-1"><div class="row-title">${l.staffName}</div><div class="row-sub">${l.staffRole} · ${l.type} leave</div></div>
-          <span class="chip chip-neutral">${l.days}d</span></div>
-          <div class="dl mb-3"><div class="dl-row"><span class="dl-key">Dates</span><span class="dl-val">${fmt.date(l.from)} – ${fmt.date(l.to)}</span></div>
-          <div class="dl-row"><span class="dl-key">Reason</span><span class="dl-val">${l.reason}</span></div></div>
-          <div class="flex gap-2"><button class="btn btn-danger-soft btn-full btn-sm" onclick="App.decideLeave('${l.id}','Rejected')">Reject</button>
-          <button class="btn btn-primary btn-full btn-sm" onclick="App.decideLeave('${l.id}','Approved')">Approve</button></div>
-        </div>`).join('');
+        html+=leaves.map(l=>{
+          const days=l.days||Math.round((new Date(l.end_date||l.to)-new Date(l.start_date||l.from))/86400000)+1;
+          return `<div class="card mb-3">
+            <div class="flex gap-3 items-center mb-2">
+              <div class="avatar" style="background:${avatarColor(l.staffName)}">${initials(l.staffName)}</div>
+              <div class="flex-1">
+                <div class="row-title">${l.staffName}</div>
+                <div class="row-sub">${l.leave_type_name||l.type} · ${days} day(s)</div>
+              </div>
+              <span class="chip chip-neutral">${days}d</span>
+            </div>
+            <div class="dl mb-3">
+              <div class="dl-row"><span class="dl-key">Dates</span><span class="dl-val">${fmt.date(l.start_date||l.from)} – ${fmt.date(l.end_date||l.to)}</span></div>
+              ${l.reason?`<div class="dl-row"><span class="dl-key">Reason</span><span class="dl-val">${l.reason}</span></div>`:''}
+            </div>
+            <div class="flex gap-2">
+              <button class="btn btn-danger-soft btn-full btn-sm" onclick="App.decideLeave('${l.public_id||l.id}','rejected')">Reject</button>
+              <button class="btn btn-primary btn-full btn-sm" onclick="App.decideLeave('${l.public_id||l.id}','approved')">Approve</button>
+            </div>
+          </div>`;
+        }).join('');
       }
       return html;
     });
   },
-  decideLeave(id,status){ this.S.decideLeave(id,status); UI.toast('Leave '+status.toLowerCase()); this.Approvals(document.getElementById('screen')); this._refreshBadges(); },
-  decideApp(id,status){ this.S.decideApplication(id,status); UI.toast('Application '+status.toLowerCase()); this.Approvals(document.getElementById('screen')); this._refreshBadges(); },
+  /* mirrors POST /leave-applications/{id}/approve and POST /leave-applications/{id}/reject */
+  decideLeave(id,status){
+    if(status==='approved') this.S.approveLeave(id);
+    else this.S.rejectLeave(id);
+    UI.toast('Leave '+status);
+    this.Approvals(document.getElementById('screen'));
+    this._refreshBadges();
+  },
+  decideApp(id,status){
+    /* mirrors POST /admissions/applications/{id}/transition (TransitionRequest) */
+    this.S.transitionApplication(id,{to_status:status});
+    UI.toast('Application: '+status.replace('_',' '));
+    this.Approvals(document.getElementById('screen'));
+    this._refreshBadges();
+  },
   _refreshBadges(){ const tb=document.querySelector('.tabbar'); if(tb){ const tabs=this.computeTabs(); tb.innerHTML=tabs.map(t=>this.tabBtn(t)).join(''); } },
 
   /* ========================================================================
@@ -760,11 +935,25 @@ const App = {
         </div></div>`;
       }
       if(isPrincipal){
-        const secs={}; this.F.students().forEach(s=>{ secs[s.section]=(secs[s.section]||0)+1; });
-        const rows=Object.entries(secs).map(([sec,n])=>({sec,n,pct:85+(sec.charCodeAt(0)%13)}));
-        html+=`<div class="card mb-4"><div class="sec-title mb-4">Attendance by section</div>
-          ${rows.map(r=>`<div class="mb-3"><div class="flex between mb-1"><span class="t-label">${r.sec} <span class="t-caption">(${r.n})</span></span><span class="t-data" style="font-weight:700">${r.pct}%</span></div>
-          <div style="height:8px;background:var(--surface-sunken);border-radius:99px;overflow:hidden"><div style="width:${r.pct}%;height:100%;background:${r.pct>=90?'var(--viz-positive)':r.pct>=80?'var(--viz-warning)':'var(--viz-negative)'};border-radius:99px"></div></div></div>`).join('')}</div>`;
+        /* Attendance — real data from StaffDB (same cross-app pattern as Founder reports) */
+        const attSections=typeof FounderDB!=='undefined'?FounderDB.attendanceSummaryBySection():[];
+        if(attSections.length===0){
+          html+=`<div class="card mb-4"><div class="sec-title mb-3">Attendance by section</div>
+            <div class="text-center" style="padding:24px;color:var(--text-tertiary)">
+              <div class="mb-2">${icon('check')}</div>
+              <div class="t-caption">Mark attendance in your sections to see data here.</div>
+            </div></div>`;
+        } else {
+          html+=`<div class="card mb-4"><div class="sec-title mb-4">Attendance by section</div>
+            ${attSections.map(s=>{
+              const pct=s.percentage;
+              const col=pct>=80?'var(--viz-positive)':pct>=60?'var(--viz-warning)':'var(--viz-negative)';
+              return `<div class="mb-3"><div class="flex between mb-1"><span class="t-label">Section ${s.section}</span><span class="t-data" style="font-weight:700;color:${col}">${pct}%</span></div>
+              <div style="height:8px;background:var(--surface-sunken);border-radius:99px;overflow:hidden">
+                <div style="width:${pct}%;height:100%;background:${col};border-radius:99px"></div></div></div>`;
+            }).join('')}
+          </div>`;
+        }
         const funnel=this.S.funnel(); const fmax=Math.max(...funnel.map(f=>f.count),1);
         html+=`<div class="card mb-4"><div class="sec-title mb-4">Admissions funnel</div>
           ${funnel.map(x=>`<div class="mb-2"><div class="flex between mb-1"><span class="t-label">${x.stage}</span><span class="t-data" style="font-weight:700">${x.count}</span></div>
@@ -789,6 +978,9 @@ const App = {
     if(S.can(P.STAFF_VIEW)) hrRows.push(this._moreRow('briefcase','Staff directory',S.staffUsers().length+' people','staffList'));
     if(S.can(P.STAFF_CREATE)) hrRows.push(this._moreRow('userPlus','Add staff','Creates a real login','addStaff'));
     if(S.can(P.ROLE_VIEW)) hrRows.push(this._moreRow('shield','Roles & permissions',S.roles().length+' roles','roles'));
+    if(S.can(P.STAFF_VIEW)) hrRows.push(this._moreRow('users','User accounts',S.staffUsers().length+' users · login status','userList'));
+    if(S.can('AUDIT.LOG.VIEW')) hrRows.push(this._moreRow('shield','Audit log',S.auditLogs().length+' events','auditLog'));
+    if(S.can('NOTIFY.DISPATCH.VIEW')) hrRows.push(this._moreRow('bell','Dispatch log',S.dispatchLogs().length+' events','dispatchLog'));
     if(S.can(P.STAFF_ATT_VIEW)&&S.can(P.STAFF_VIEW)) hrRows.push(this._moreRow('users','Staff attendance today','Team check-in overview','staffAttendance'));
     if(S.can(P.ACADEMIC_MANAGE)) hrRows.push(this._moreRow('building2','Academic structure','Classes, sections & subjects','academic'));
     el.innerHTML=`
@@ -801,7 +993,7 @@ const App = {
       <div class="sec-head"><div class="sec-title">Personal</div></div>
       <div class="card card-pad-0 mb-4"><div class="list">
         ${S.can(P.STAFF_ATT_CREATE)?this._moreRow('clock','Self check-in',this._checkinSub(),'selfCheckIn'):''}
-        ${S.can(P.LEAVE_CREATE)?this._moreRow('calendar','Apply for leave',S.myLeaves().length+' request(s)','__applyLeave'):''}
+        ${S.can(P.LEAVE_CREATE)?this._moreRow('calendar','My leave',S.myLeaves().length+' application(s)','leaveHistory'):''}
         ${this._moreRow('settings','Settings','Theme & preferences','settings')}
       </div></div>
       <div class="dashed-card mb-4">${icon('shield')} <span class="t-caption">Viewing as <b>${p.name}</b> (${role}). Navigation is computed from ${S.perms().length} live permission codes — tap the top banner to switch staff member.</span></div>
@@ -813,21 +1005,99 @@ const App = {
   },
   _checkinSub(){ const r=this.S.myStaffAttendance(); if(!r)return 'Not checked in yet'; if(r.checkIn&&!r.checkOut)return 'Checked in '+fmt.ago(r.checkIn); if(r.checkIn&&r.checkOut)return 'Checked out '+fmt.ago(r.checkOut); return 'Not checked in yet'; },
   applyLeave(){
-    const {close}=UI.sheet(`<div class="sheet-title">Apply for leave</div>
-      <div class="field"><label class="field-label">Type</label><select class="select" id="al-type"><option>Casual</option><option>Sick</option><option>Personal</option></select></div>
-      <div class="grid-2"><div class="field"><label class="field-label">From</label><input class="input" id="al-from" type="date"></div>
-      <div class="field"><label class="field-label">To</label><input class="input" id="al-to" type="date"></div></div>
-      <div class="field"><label class="field-label">Reason</label><textarea class="textarea" id="al-reason" placeholder="Brief reason"></textarea></div>
+    /* Mirrors POST /leave-applications (LeaveApplicationCreate):
+       leave_type_name (required), start_date (required), end_date (required), reason (optional) */
+    const leaveTypes=this.S.leaveTypeNames();
+    const today=new Date().toISOString().split('T')[0];
+    const {close}=UI.sheet(`
+      <div class="sheet-title">Apply for leave</div>
+      <div class="field"><label class="field-label">Leave type <span class="req">*</span></label>
+        <select class="select" id="al-type">
+          <option value="">— Select —</option>
+          ${leaveTypes.map(t=>`<option value="${t}">${t}</option>`).join('')}
+        </select></div>
+      <div class="grid-2">
+        <div class="field"><label class="field-label">Start date <span class="req">*</span></label>
+          <input class="input" id="al-start" type="date" value="${today}"></div>
+        <div class="field"><label class="field-label">End date <span class="req">*</span></label>
+          <input class="input" id="al-end" type="date" value="${today}"></div>
+      </div>
+      <div id="al-duration" class="field-hint mb-2">1 day requested</div>
+      <div class="field"><label class="field-label">Reason</label>
+        <textarea class="textarea" id="al-reason" placeholder="Optional — helps your manager plan coverage" rows="3"></textarea></div>
       <div id="al-err"></div>
-      <button class="btn btn-primary btn-full btn-lg mt-2" onclick="App.saveLeave()">Submit request</button>`);
+      <button class="btn btn-primary btn-full btn-lg mt-3" onclick="App.saveLeave()">${icon('check')} Submit application</button>
+    `);
     this._leaveClose=close;
+    ['al-start','al-end'].forEach(id=>{
+      const el=document.getElementById(id);
+      if(el) el.addEventListener('change',()=>{
+        const s=document.getElementById('al-start')?.value, e=document.getElementById('al-end')?.value;
+        if(s&&e){ const d=Math.round((new Date(e)-new Date(s))/86400000)+1;
+          const hint=document.getElementById('al-duration'); if(hint) hint.textContent=d>0?`${d} day(s) requested`:'End must be after start'; }
+      });
+    });
   },
   saveLeave(){
-    const from=document.getElementById('al-from').value, to=document.getElementById('al-to').value, reason=document.getElementById('al-reason').value.trim();
-    if(!from||!to){ document.getElementById('al-err').innerHTML=`<div class="field-error mb-2">${icon('alert')} Select both dates.</div>`; return; }
-    const days=Math.max(1,Math.round((new Date(to)-new Date(from))/86400000)+1);
-    this.S.addLeave({type:document.getElementById('al-type').value,from,to,days,reason:reason||'—'});
-    this._leaveClose&&this._leaveClose(); UI.toast('Leave request submitted'); this.More(document.getElementById('screen'));
+    const leave_type_name=document.getElementById('al-type').value;
+    const start_date=document.getElementById('al-start').value;
+    const end_date=document.getElementById('al-end').value;
+    const reason=document.getElementById('al-reason').value.trim()||null;
+    const err=document.getElementById('al-err');
+    if(!leave_type_name){ err.innerHTML=`<div class="field-error mb-2">${icon('alert')} Select a leave type.</div>`; return; }
+    if(!start_date||!end_date){ err.innerHTML=`<div class="field-error mb-2">${icon('alert')} Select start and end dates.</div>`; return; }
+    if(end_date<start_date){ err.innerHTML=`<div class="field-error mb-2">${icon('alert')} End date must be on or after start date.</div>`; return; }
+    this.S.addLeave({leave_type_name,start_date,end_date,reason});
+    this._leaveClose&&this._leaveClose();
+    UI.toast('Leave application submitted');
+    this._refreshBadges();
+  },
+
+  /* ---- LEAVE HISTORY — employee's own LeaveApplicationOut list ---- */
+  LeaveHistory(el){
+    this._backTo='more'; this.ctx.sub=true; this.ctx.title='My leave'; this.ctx.subtitle='Applications & balance';
+    this.ctx.action=`<button class="appbar-btn" onclick="App.applyLeave()" aria-label="Apply">${icon('plus')}</button>`;
+    document.querySelector('.appbar')?.remove(); document.getElementById('app').insertAdjacentHTML('afterbegin',this.AppBar());
+    const leaves=this.S.myLeaves();
+    const leaveTypes=this.S.leaveTypes();
+    /* Compute used days per type from approved leaves */
+    const used={};
+    leaves.filter(l=>l.status==='approved').forEach(l=>{ used[l.leave_type_name||l.type]=(used[l.leave_type_name||l.type]||0)+(l.days||1); });
+    const statusChip={pending:'chip-warning',approved:'chip-success',rejected:'chip-danger'};
+    el.innerHTML=`
+      ${leaveTypes.filter(t=>t.default_annual_quota).length>0?`
+        <div class="sec-head"><div class="sec-title">Leave balance</div></div>
+        <div class="card card-pad-0 mb-4"><div class="list">
+          ${leaveTypes.filter(t=>t.default_annual_quota).map(t=>{
+            const u=used[t.leave_type_name]||0; const q=t.default_annual_quota;
+            const pct=Math.min(100,Math.round(u/q*100));
+            return `<div class="row" style="cursor:default;flex-wrap:wrap">
+              <div class="row-main"><div class="row-title">${t.leave_type_name}</div></div>
+              <div class="row-trail"><span class="t-data" style="font-weight:700">${q-u}d left <span class="t-caption">(${u}/${q} used)</span></span></div>
+              <div style="width:100%;order:3;padding:6px 0 4px"><div style="height:6px;background:var(--surface-sunken);border-radius:99px;overflow:hidden">
+                <div style="width:${pct}%;height:100%;background:${pct>=80?'var(--viz-negative)':pct>=50?'var(--viz-warning)':'var(--viz-positive)'};border-radius:99px"></div>
+              </div></div></div>`;
+          }).join('')}
+        </div></div>`:''}
+      <div class="sec-head"><div class="sec-title">Applications (${leaves.length})</div></div>
+      ${leaves.length===0
+        ?`<div class="state" style="min-height:28vh">
+            <div class="state-ill">${icon('calendar')}</div>
+            <div class="state-title">No applications yet</div>
+            <div class="state-msg">Tap + to apply for leave. Your manager will review and approve or reject it.</div>
+          </div>`
+        :`<div class="card card-pad-0"><div class="list">
+          ${leaves.map(l=>`<div class="row" style="cursor:default">
+            <div class="avatar avatar-sq" style="background:var(--info-subtle);color:var(--info)">${icon('calendar')}</div>
+            <div class="row-main">
+              <div class="row-title">${l.leave_type_name||l.type}</div>
+              <div class="row-sub">${fmt.date(l.start_date||l.from)} – ${fmt.date(l.end_date||l.to)} · ${l.days} day(s)</div>
+              ${l.reason?`<div class="row-sub">${l.reason}</div>`:''}
+            </div>
+            <span class="chip ${statusChip[l.status]||'chip-neutral'}">${l.status}</span>
+          </div>`).join('')}
+        </div></div>`}
+    `;
   },
 
   Settings(el){
@@ -838,12 +1108,377 @@ const App = {
     <div class="card card-pad-0 mb-4"><div class="list">
       <div class="row" onclick="App.openThemeSheet()"><div class="avatar avatar-sq" style="background:var(--brand-subtle);color:var(--brand)">${icon('palette')}</div><div class="row-main"><div class="row-title" style="font-weight:500">Theme</div><div class="row-sub">${this.themeName(set.theme)} · ${set.mode}</div></div><span class="row-chev">${icon('chevronR')}</span></div>
     </div></div>
+    <div class="card card-pad-0 mb-4"><div class="list">
+      <div class="row" onclick="App.changePasswordSheet()"><div class="avatar avatar-sq" style="background:var(--info-subtle);color:var(--info)">${icon('lock')}</div><div class="row-main"><div class="row-title" style="font-weight:500">Change password</div><div class="row-sub">Mirrors PATCH /users/me/password</div></div><span class="row-chev">${icon('chevronR')}</span></div>
+    </div></div>
     <button class="btn btn-secondary btn-full mb-4" onclick="App.roleSwitcher()">${icon('users')} Switch staff member (review only)</button>
     <div class="card card-pad-0 mb-4"><div class="list">
       <div class="row" onclick="App.resetPrompt()"><div class="avatar avatar-sq" style="background:var(--danger-subtle);color:var(--danger)">${icon('trash')}</div><div class="row-main"><div class="row-title" style="font-weight:500;color:var(--danger)">Reset demo data</div><div class="row-sub">Regenerate leads, leaves, attendance & payments</div></div></div>
       <div class="row" onclick="App.confirmLogout()"><div class="avatar avatar-sq" style="background:var(--danger-subtle);color:var(--danger)">${icon('logout')}</div><div class="row-main"><div class="row-title" style="font-weight:500;color:var(--danger)">Sign out</div><div class="row-sub">${u.name} · ${u.email}</div></div></div>
     </div></div>`;
   },
+  changePasswordSheet(){
+    /* Mirrors PATCH /users/me/password (ChangeMyPasswordRequest) */
+    const {close}=UI.sheet(`
+      <div class="sheet-title">Change password</div>
+      <p class="text-secondary mb-4" style="margin-top:-8px">Mirrors PATCH /users/me/password (ChangeMyPasswordRequest)</p>
+      <div class="field"><label class="field-label">Current password <span class="req">*</span></label>
+        <input class="input" id="cp-current" type="text" placeholder="Your current password"></div>
+      <div class="field"><label class="field-label">New password <span class="req">*</span></label>
+        <input class="input" id="cp-new" type="text" placeholder="New password"></div>
+      <div id="cp-err"></div>
+      <button class="btn btn-primary btn-full btn-lg mt-3" onclick="App._doChangePassword()">Change password</button>
+    `);
+    this._cpClose=close;
+  },
+  _doChangePassword(){
+    const current=document.getElementById('cp-current').value.trim();
+    const newPw=document.getElementById('cp-new').value.trim();
+    const err=document.getElementById('cp-err');
+    if(!current||!newPw){ err.innerHTML=`<div class="field-error mb-2">${icon('alert')} Both fields are required.</div>`; return; }
+    const result=this.S.changeMyPassword({current_password:current,new_password:newPw});
+    if(result.error){ err.innerHTML=`<div class="field-error mb-2">${icon('alert')} ${result.error}</div>`; return; }
+    this._cpClose&&this._cpClose();
+    UI.toast('Password changed');
+  },
+
+  /* ========================================================================
+     USER LIST (GET /users → UserOut[])
+     UserOut: public_id, full_name, email, phone_number, is_active,
+              is_platform_admin, last_login_at
+     ======================================================================== */
+  UserList(el){
+    this._backTo='more'; this.ctx.sub=true; this.ctx.title='User accounts';
+    this.ctx.subtitle=this.S.staffUsers().length+' users';
+    document.querySelector('.appbar')?.remove(); document.getElementById('app').insertAdjacentHTML('afterbegin',this.AppBar());
+    const users=this.S.users();
+    el.innerHTML=`
+      <p class="t-caption mb-3">Every staff member has a user account (login). This mirrors GET /users → UserOut[].</p>
+      <div class="card card-pad-0 mb-4"><div class="list">
+        ${users.map(u=>{
+          const lastLogin=u.last_login_at?fmt.ago(u.last_login_at):'Never';
+          return `<div class="row" onclick="App.go('userDetail',{sub:true,id:'${u.public_id}',title:'User'})">
+            <div class="avatar" style="background:${avatarColor(u.full_name)}">${initials(u.full_name)}</div>
+            <div class="row-main">
+              <div class="row-title">${u.full_name}</div>
+              <div class="row-sub">${u.email||'—'} · Last login: ${lastLogin}</div>
+            </div>
+            <div class="flex gap-2 items-center">
+              <span class="chip ${u.is_active?'chip-success':'chip-neutral'}">${u.is_active?'Active':'Inactive'}</span>
+              <span class="row-chev">${icon('chevronR')}</span>
+            </div>
+          </div>`;
+        }).join('')}
+      </div></div>`;
+  },
+
+  /* ========================================================================
+     USER DETAIL (GET /users/{id} → UserOut)
+     Also: PATCH /users/{id} (UserUpdate), POST reset-password, role-assignments
+     ======================================================================== */
+  UserDetail(el){
+    const u=this.S.staffUserById(this.ctx.id);
+    if(!u){ el.innerHTML='<div class="state"><div class="state-title">Not found</div></div>'; return; }
+    this._backTo='userList';
+    const r=this.S.roleById(u.roleId);
+    const canEdit=this.S.can(this.S.PERMS.STAFF_UPDATE);
+    const roleAssigns=this.S.roleAssignmentsForUser(u.public_id||u.id);
+    const activeAssign=roleAssigns.find(a=>a.is_active);
+    this.ctx.title=u.full_name||u.name; this.ctx.subtitle='User account';
+    this.ctx.action=canEdit?`<button class="appbar-btn" onclick="App._editUserSheet('${u.public_id||u.id}')" aria-label="Edit">${icon('edit')}</button>`:'';
+    document.querySelector('.appbar')?.remove(); document.getElementById('app').insertAdjacentHTML('afterbegin',this.AppBar());
+    el.innerHTML=`
+      <div class="card card-raised mb-4 flex gap-3 items-center">
+        <div class="avatar" style="width:56px;height:56px;font-size:18px;background:${avatarColor(u.full_name||u.name)}">${u.avatar||initials(u.full_name||u.name)}</div>
+        <div class="flex-1">
+          <div class="t-h3">${u.full_name||u.name}</div>
+          <div class="row-sub">${u.designation||'—'}</div>
+          <div class="flex gap-2 mt-2">
+            <span class="chip ${u.is_active!==false?'chip-success':'chip-neutral'}">${u.is_active!==false?'Active':'Inactive'}</span>
+            <span class="chip ${u.passwordSet?'chip-brand':'chip-warning'}">${u.passwordSet?'Login set':'No login'}</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="sec-head"><div class="sec-title">User account</div><span class="t-caption">UserOut fields</span></div>
+      <div class="card mb-4"><div class="dl">
+        <div class="dl-row"><span class="dl-key">public_id</span><span class="dl-val t-code">${u.public_id||u.id}</span></div>
+        <div class="dl-row"><span class="dl-key">full_name</span><span class="dl-val">${u.full_name||u.name}</span></div>
+        <div class="dl-row"><span class="dl-key">email</span><span class="dl-val">${u.email||'—'}</span></div>
+        <div class="dl-row"><span class="dl-key">phone_number</span><span class="dl-val">${u.phone_number||'—'}</span></div>
+        <div class="dl-row"><span class="dl-key">is_active</span><span class="dl-val">${u.is_active!==false?'true':'false'}</span></div>
+        <div class="dl-row"><span class="dl-key">is_platform_admin</span><span class="dl-val">${u.is_platform_admin||false}</span></div>
+        <div class="dl-row"><span class="dl-key">last_login_at</span><span class="dl-val">${u.last_login_at?fmt.ago(u.last_login_at):'Never'}</span></div>
+      </div></div>
+
+      <div class="sec-head">
+        <div class="sec-title">Role assignment</div>
+        ${canEdit?`<button class="sec-link" onclick="App._assignRoleSheet('${u.public_id||u.id}')">Change role</button>`:''}
+      </div>
+      <div class="card mb-4"><div class="dl">
+        <div class="dl-row"><span class="dl-key">Current role</span><span class="dl-val">${r?r.role_name||r.name:'—'}</span></div>
+        <div class="dl-row"><span class="dl-key">role_code</span><span class="dl-val t-code">${r?r.role_code||r.code:'—'}</span></div>
+        <div class="dl-row"><span class="dl-key">valid_from</span><span class="dl-val">${activeAssign?activeAssign.valid_from:'—'}</span></div>
+        <div class="dl-row"><span class="dl-key">valid_until</span><span class="dl-val">${activeAssign?.valid_until||'No expiry'}</span></div>
+      </div></div>
+
+      ${canEdit?`
+      <div class="sec-head"><div class="sec-title">Admin actions</div></div>
+      <div class="card card-pad-0 mb-4"><div class="list">
+        <div class="row" onclick="App._resetPasswordAdmin('${u.public_id||u.id}')">
+          <div class="avatar avatar-sq" style="background:var(--warning-subtle);color:var(--warning)">${icon('lock')}</div>
+          <div class="row-main"><div class="row-title">Reset password</div>
+            <div class="row-sub">POST /users/{id}/reset-password (no body)</div></div>
+          <span class="row-chev">${icon('chevronR')}</span></div>
+        <div class="row" onclick="App._toggleUserActive('${u.public_id||u.id}',${u.is_active!==false})">
+          <div class="avatar avatar-sq" style="background:${u.is_active!==false?'var(--danger-subtle)':'var(--success-subtle)'};color:${u.is_active!==false?'var(--danger)':'var(--success)'}">${icon(u.is_active!==false?'ban':'check')}</div>
+          <div class="row-main"><div class="row-title" style="color:${u.is_active!==false?'var(--danger)':'var(--success)'}">${u.is_active!==false?'Deactivate account':'Activate account'}</div>
+            <div class="row-sub">PATCH /users/{id} {is_active: ${!(u.is_active!==false)}}</div></div>
+          <span class="row-chev">${icon('chevronR')}</span></div>
+      </div></div>`:''}
+    `;
+  },
+  _editUserSheet(id){
+    const u=this.S.staffUserById(id); if(!u) return;
+    /* Mirrors PATCH /users/{id} (UserUpdate) */
+    const {close}=UI.sheet(`
+      <div class="sheet-title">Edit user</div>
+      <p class="text-secondary mb-4" style="margin-top:-8px">Mirrors PATCH /users/{id} (UserUpdate)</p>
+      <div class="field"><label class="field-label">Full name</label>
+        <input class="input" id="ue-name" value="${u.full_name||u.name}"></div>
+      <div class="field"><label class="field-label">Email</label>
+        <input class="input" id="ue-email" type="email" value="${u.email||''}"></div>
+      <div class="field"><label class="field-label">Phone number</label>
+        <input class="input" id="ue-phone" type="tel" value="${u.phone_number||''}"></div>
+      <button class="btn btn-primary btn-full btn-lg mt-3" onclick="App._saveUserEdit('${id}')">Save changes</button>
+    `);
+    this._userEditClose=close;
+  },
+  _saveUserEdit(id){
+    const name=document.getElementById('ue-name').value.trim();
+    const email=document.getElementById('ue-email').value.trim();
+    const phone=document.getElementById('ue-phone').value.trim();
+    this.S.updateUser(id,{full_name:name,email,phone_number:phone});
+    this._userEditClose&&this._userEditClose();
+    this.UserDetail(document.getElementById('screen'));
+    UI.toast('User updated');
+  },
+  _resetPasswordAdmin(id){
+    const u=this.S.staffUserById(id); if(!u) return;
+    UI.confirm({title:`Reset ${u.full_name||u.name}'s password?`,
+      message:'This triggers a password reset (prototype: no email sent). The user will need a new temporary password.',
+      confirmText:'Reset',danger:false
+    }).then(ok=>{
+      if(!ok) return;
+      this.S.resetPassword(id);
+      UI.toast('Password reset triggered (POST /users/{id}/reset-password)');
+    });
+  },
+  _toggleUserActive(id,currentlyActive){
+    this.S.updateUser(id,{is_active:!currentlyActive});
+    this.UserDetail(document.getElementById('screen'));
+    UI.toast(currentlyActive?'Account deactivated':'Account activated');
+  },
+  _assignRoleSheet(userId){
+    const u=this.S.staffUserById(userId); if(!u) return;
+    const currentRoleId=u.roleId;
+    /* Mirrors POST /users/{id}/role-assignments (RoleAssignmentCreate) */
+    const {close}=UI.sheet(`
+      <div class="sheet-title">Assign role</div>
+      <p class="text-secondary mb-4" style="margin-top:-8px">Mirrors POST /users/{id}/role-assignments (RoleAssignmentCreate)</p>
+      <div class="field"><label class="field-label">Role <span class="req">*</span></label>
+        <select class="select" id="ra-role">
+          ${this.S.roles().map(r=>`<option value="${r.public_id||r.id}" ${(r.public_id||r.id)===currentRoleId?'selected':''}>${r.role_name||r.name}</option>`).join('')}
+        </select></div>
+      <div class="grid-2">
+        <div class="field"><label class="field-label">Valid from</label>
+          <input class="input" id="ra-from" type="date" value="${new Date().toISOString().split('T')[0]}"></div>
+        <div class="field"><label class="field-label">Valid until</label>
+          <input class="input" id="ra-until" type="date" placeholder="No expiry"></div>
+      </div>
+      <div class="field-hint">A new assignment supersedes the current one. Previous assignment is marked inactive (RoleAssignmentOut.is_active = false).</div>
+      <button class="btn btn-primary btn-full btn-lg mt-3" onclick="App._saveRoleAssignment('${userId}')">Assign role</button>
+    `);
+    this._raClose=close;
+  },
+  _saveRoleAssignment(userId){
+    const role_public_id=document.getElementById('ra-role').value;
+    const valid_from=document.getElementById('ra-from').value||null;
+    const valid_until=document.getElementById('ra-until').value||null;
+    const result=this.S.assignRole(userId,{role_public_id,valid_from,valid_until});
+    this._raClose&&this._raClose();
+    this.UserDetail(document.getElementById('screen'));
+    UI.toast('Role assigned (POST /users/{id}/role-assignments)');
+  },
+
+  /* ========================================================================
+     NOTIFICATIONS INBOX — personal view
+     mirrors GET /notifications/dispatch-log?recipient={user_public_id}
+     Shows DispatchLogOut records for the current user (internal channel).
+     ======================================================================== */
+  Notifications(el){
+    this._backTo='more'; this.ctx.sub=true; this.ctx.title='Notifications';
+    this.ctx.subtitle='Your inbox';
+    this.ctx.action=`<button class="appbar-btn" onclick="App._markAllRead()" aria-label="Mark all read" title="Mark all read">${icon('check')}</button>`;
+    document.querySelector('.appbar')?.remove(); document.getElementById('app').insertAdjacentHTML('afterbegin',this.AppBar());
+    el.innerHTML=this._notifInboxMarkup();
+  },
+  _notifInboxMarkup(){
+    /* Filter to internal channel for the current user — like an in-app inbox.
+       Other channels (email, sms) are shown in the full dispatch log.           */
+    const myLogs=this.S.myDispatchLogs().filter(l=>l.channel==='internal');
+    const channelIcon={email:'mail',sms:'phone',whatsapp:'phone',push:'bell',internal:'bell'};
+    const sourceIcon={Leave:'calendar',Invoice:'wallet',Payment:'wallet',Application:'trend',Lead:'trend',Role:'shield',Attendance:'check',User:'users'};
+    if(!myLogs.length) return `
+      <div class="state" style="min-height:40vh">
+        <div class="state-ill">${icon('bell')}</div>
+        <div class="state-title">All clear</div>
+        <div class="state-msg">No notifications yet. Notifications appear here when your leave is decided, or when something needs your attention.</div>
+      </div>`;
+    return `
+      <div class="card card-pad-0"><div class="list">
+        ${myLogs.map(l=>{
+          const ic=sourceIcon[l.source_type]||'bell';
+          const unread=!l.read;
+          return `<div class="row ${unread?'':'opacity-60'}" style="cursor:pointer;${unread?'background:var(--surface-tint,var(--surface-card));':''}" onclick="App._openNotif('${l.public_id}')">
+            <div class="avatar avatar-sq" style="background:${unread?'var(--brand-subtle)':'var(--surface-sunken)'};color:${unread?'var(--brand)':'var(--text-tertiary)'}">
+              ${icon(ic)}${unread?`<span style="position:absolute;top:4px;right:4px;width:8px;height:8px;border-radius:50%;background:var(--brand)"></span>`:''}
+            </div>
+            <div class="row-main">
+              <div class="row-title" style="${unread?'font-weight:600':''}">${l.rendered_subject||l.source_type+' notification'}</div>
+              <div class="row-sub" style="white-space:normal;line-height:1.4">${l.rendered_body}</div>
+              <div class="row-sub" style="font-size:11px;color:var(--text-tertiary);margin-top:2px">${fmt.ago(l.queued_at)} · ${l.source_type}</div>
+            </div>
+          </div>`;
+        }).join('')}
+      </div></div>
+      <div class="dashed-card mt-4">${icon('bell')} <span class="t-caption">Showing internal channel only. Email, SMS and push dispatches are in the <button class="sec-link" onclick="App.go('dispatchLog')">dispatch log</button>.</span></div>
+    `;
+  },
+  _openNotif(id){
+    this.S.markRead(id);
+    document.getElementById('screen').innerHTML=this._notifInboxMarkup();
+    // Re-render the appbar bell to reflect the updated count
+    document.querySelector('.appbar')?.remove();
+    document.getElementById('app').insertAdjacentHTML('afterbegin',this.AppBar());
+  },
+  _markAllRead(){
+    this.S.markAllRead();
+    this.Notifications(document.getElementById('screen'));
+    UI.toast('All notifications marked as read');
+  },
+
+  /* ========================================================================
+     DISPATCH LOG — admin/principal view
+     mirrors GET /notifications/dispatch-log → DispatchLogOut[]
+     query params: recipient (user public_id), status
+     DispatchLogOut: public_id, channel, recipient_user_public_id, source_type,
+                     source_id, rendered_subject, rendered_body, status,
+                     failure_reason, queued_at, sent_at
+     ======================================================================== */
+  DispatchLog(el){
+    this._backTo='more'; this.ctx.sub=true; this.ctx.title='Dispatch log';
+    this.ctx.subtitle='All notification dispatches';
+    document.querySelector('.appbar')?.remove(); document.getElementById('app').insertAdjacentHTML('afterbegin',this.AppBar());
+    if(!this.S.can('NOTIFY.DISPATCH.VIEW')) return this.noPermission(el);
+    this._dlRecipFilter=this._dlRecipFilter||'';
+    this._dlStatusFilter=this._dlStatusFilter||'';
+    el.innerHTML=this._dispatchLogMarkup();
+  },
+  _dispatchLogMarkup(){
+    const staff=this.S.staffUsers();
+    const staffMap=Object.fromEntries(staff.map(u=>[u.public_id||u.id,u.full_name||u.name]));
+    const logs=this.S.dispatchLogs({
+      recipient:this._dlRecipFilter||undefined,
+      status:this._dlStatusFilter||undefined,
+    });
+    const chanIcon={email:'mail',sms:'phone',whatsapp:'phone',push:'bell',internal:'bell'};
+    const statusChip={sent:'chip-success',failed:'chip-danger',queued:'chip-warning',pending:'chip-neutral'};
+    return `
+      <div class="flex gap-2 mb-3" style="flex-wrap:wrap">
+        <select class="select" style="flex:1;min-width:120px" onchange="App._dlRecipFilter=this.value;App._dispatchRefresh()">
+          <option value="">All recipients</option>
+          ${staff.map(u=>`<option value="${u.public_id||u.id}" ${this._dlRecipFilter===(u.public_id||u.id)?'selected':''}>${u.full_name||u.name}</option>`).join('')}
+        </select>
+        <select class="select" style="flex:1;min-width:120px" onchange="App._dlStatusFilter=this.value;App._dispatchRefresh()">
+          ${['','sent','failed','queued'].map(s=>`<option value="${s}" ${this._dlStatusFilter===s?'selected':''}>${s||'All statuses'}</option>`).join('')}
+        </select>
+      </div>
+      ${logs.length===0
+        ?`<div class="state" style="min-height:30vh"><div class="state-ill">${icon('bell')}</div><div class="state-title">No dispatches match</div><div class="state-msg">Try clearing the filters.</div></div>`
+        :`<div class="card card-pad-0 mb-4"><div class="list">
+          ${logs.map(l=>{
+            const recipient=staffMap[l.recipient_user_public_id]||l.recipient_user_public_id;
+            return `<div class="row" style="cursor:default;flex-wrap:wrap">
+              <div class="avatar avatar-sq" style="background:${l.status==='failed'?'var(--danger-subtle)':'var(--surface-sunken)'};color:${l.status==='failed'?'var(--danger)':'var(--text-secondary)'}">
+                ${icon(chanIcon[l.channel]||'bell')}
+              </div>
+              <div class="row-main">
+                <div class="row-title" style="font-size:13px">${l.rendered_subject||l.rendered_body.slice(0,40)}</div>
+                <div class="row-sub">→ ${recipient} · ${l.channel} · ${fmt.ago(l.queued_at)}</div>
+                ${l.failure_reason?`<div class="row-sub" style="color:var(--danger)">${l.failure_reason}</div>`:''}
+              </div>
+              <div class="flex gap-1 items-center">
+                <span class="chip ${statusChip[l.status]||'chip-neutral'}" style="font-size:10px">${l.status}</span>
+                <span class="t-code" style="font-size:10px;color:var(--text-tertiary)">${l.source_type||'—'}</span>
+              </div>
+            </div>`;
+          }).join('')}
+        </div></div>
+        <div class="dashed-card">${icon('shield')} <span class="t-caption">Mirrors GET /notifications/dispatch-log?recipient=&status=. ${logs.length} of ${this.S.dispatchLogs().length} total dispatches shown. Pagination added by Claude Code.</span></div>`}
+    `;
+  },
+  _dispatchRefresh(){ document.getElementById('screen').innerHTML=this._dispatchLogMarkup(); },
+
+  /* ========================================================================
+     AUDIT LOG (GET /audit-logs → AuditLogOut[])
+     Query params: auditable_type, actor, from, to, page, page_size
+     ======================================================================== */
+  AuditLog(el){
+    this._backTo='more'; this.ctx.sub=true; this.ctx.title='Audit log';
+    this.ctx.subtitle='Platform event trail';
+    document.querySelector('.appbar')?.remove(); document.getElementById('app').insertAdjacentHTML('afterbegin',this.AppBar());
+    this._auditTypeFilter=this._auditTypeFilter||'';
+    this._auditActorFilter=this._auditActorFilter||'';
+    el.innerHTML=this._auditMarkup();
+  },
+  _auditMarkup(){
+    const types=['','User','Leave','Invoice','Payment','Lead','Application','Role'];
+    const staff=this.S.staffUsers();
+    const logs=this.S.auditLogs({
+      auditable_type:this._auditTypeFilter||undefined,
+      actor:this._auditActorFilter||undefined,
+    });
+    const typeIcon={User:'users',Leave:'calendar',Invoice:'wallet',Payment:'wallet',Lead:'trend',Application:'trend',Role:'shield'};
+    const actorMap=Object.fromEntries(staff.map(u=>[u.public_id||u.id,u.full_name||u.name]));
+    return `
+      <div class="flex gap-2 mb-3" style="flex-wrap:wrap">
+        <select class="select" style="flex:1;min-width:120px" onchange="App._auditTypeFilter=this.value;App._auditMarkupRefresh()">
+          ${types.map(t=>`<option value="${t}" ${this._auditTypeFilter===t?'selected':''}>${t||'All types'}</option>`).join('')}
+        </select>
+        <select class="select" style="flex:1;min-width:120px" onchange="App._auditActorFilter=this.value;App._auditMarkupRefresh()">
+          <option value="">All actors</option>
+          ${staff.map(u=>`<option value="${u.public_id||u.id}" ${this._auditActorFilter===(u.public_id||u.id)?'selected':''}>${u.full_name||u.name}</option>`).join('')}
+        </select>
+      </div>
+      ${logs.length===0
+        ?`<div class="state" style="min-height:30vh"><div class="state-ill">${icon('shield')}</div><div class="state-title">No events match</div><div class="state-msg">Try clearing the filters.</div></div>`
+        :`<div class="card card-pad-0"><div class="list">
+          ${logs.map(l=>{ const actor=actorMap[l.actor_user_public_id]||l.actor_user_public_id||'System';
+            return `<div class="row" style="cursor:default">
+              <div class="avatar avatar-sq" style="background:var(--surface-sunken);color:var(--text-secondary)">${icon(typeIcon[l.auditable_type]||'shield')}</div>
+              <div class="row-main">
+                <div class="row-title" style="font-size:13px">${l.description}</div>
+                <div class="row-sub">${l.auditable_type} · ${actor} · ${fmt.ago(l.occurred_at)}</div>
+              </div>
+              <div class="t-code" style="font-size:10px;color:var(--text-tertiary);white-space:nowrap;align-self:flex-start">${l.action_type}</div>
+            </div>`;
+          }).join('')}
+        </div></div>
+        <div class="dashed-card mt-3">${icon('shield')} <span class="t-caption">Mirrors GET /audit-logs with params: auditable_type, actor, from, to. Full-text results — pagination added by Claude Code.</span></div>`}
+    `;
+  },
+  _auditMarkupRefresh(){ document.getElementById('screen').innerHTML=this._auditMarkup(); },
 
   /* ========================================================================
      PHASE B — STAFF DIRECTORY, ADD/EDIT STAFF (role-first permission picker),
@@ -890,18 +1525,45 @@ const App = {
     this.ctx.title=u.name; this.ctx.subtitle=u.designation;
     this.ctx.action = canEdit?`<button class="appbar-btn" onclick="App.go('editStaff',{sub:true,id:'${u.id}',edit:true})" aria-label="Edit">${icon('edit')}</button>`:'';
     document.querySelector('.appbar')?.remove(); document.getElementById('app').insertAdjacentHTML('afterbegin',this.AppBar());
+    const empTypeLabel={'full_time':'Full-time','part_time':'Part-time','contract':'Contract','visiting':'Visiting'};
     el.innerHTML=`
       <div class="card card-raised mb-4 flex gap-3 items-center">
-        <div class="avatar" style="width:56px;height:56px;font-size:18px;background:${avatarColor(u.name)}">${u.avatar}</div>
-        <div class="flex-1"><div class="t-h3">${u.name}</div><div class="row-sub">${u.designation} · ${u.department||'—'}</div></div>
+        <div class="avatar" style="width:56px;height:56px;font-size:18px;background:${avatarColor(u.name)}">${u.avatar||initials(u.name)}</div>
+        <div class="flex-1">
+          <div class="t-h3">${u.name}</div>
+          <div class="row-sub">${u.designation} · ${u.department||'—'}</div>
+          <div class="flex gap-2 mt-2">
+            <span class="chip ${u.is_active!==false&&u.passwordSet?'chip-success':'chip-warning'}"><span class="chip-dot"></span>${u.is_active!==false&&u.passwordSet?'Active':'Pending login'}</span>
+            ${u.employment_type?`<span class="chip chip-neutral">${empTypeLabel[u.employment_type]||u.employment_type}</span>`:''}
+          </div>
+        </div>
       </div>
+
+      <div class="sec-head"><div class="sec-title">Employment details</div><span class="t-caption">StaffOut fields</span></div>
       <div class="card mb-4"><div class="dl">
-        <div class="dl-row"><span class="dl-key">Login email</span><span class="dl-val">${u.email}</span></div>
-        <div class="dl-row"><span class="dl-key">Login status</span><span class="dl-val">${u.passwordSet?`<span class="chip chip-success">Active</span>`:`<span class="chip chip-warning">Password not set</span>`}</span></div>
+        <div class="dl-row"><span class="dl-key">Employee code</span><span class="dl-val t-code">${u.employee_code||'—'}</span></div>
+        <div class="dl-row"><span class="dl-key">Date of joining</span><span class="dl-val">${u.date_of_joining?fmt.date(u.date_of_joining):'—'}</span></div>
+        <div class="dl-row"><span class="dl-key">Employment type</span><span class="dl-val">${empTypeLabel[u.employment_type]||u.employment_type||'—'}</span></div>
         <div class="dl-row"><span class="dl-key">Department</span><span class="dl-val">${u.department||'—'}</span></div>
         <div class="dl-row"><span class="dl-key">Reports to</span><span class="dl-val">${mgr?mgr.name:'—'}</span></div>
         ${u.section?`<div class="dl-row"><span class="dl-key">Class section</span><span class="dl-val">${u.section}</span></div>`:''}
       </div></div>
+
+      <div class="sec-head"><div class="sec-title">Contact</div></div>
+      <div class="card mb-4"><div class="dl">
+        <div class="dl-row"><span class="dl-key">Login email</span><span class="dl-val">${u.email||'—'}</span></div>
+        ${u.phone_number?`<div class="dl-row"><span class="dl-key">Phone</span><span class="dl-val">${u.phone_number}</span></div>`:''}
+        <div class="dl-row"><span class="dl-key">Login status</span><span class="dl-val">${u.passwordSet?`<span class="chip chip-success">Active</span>`:`<span class="chip chip-warning">Not set</span>`}</span></div>
+      </div></div>
+
+      ${(u.pf_number||u.esi_number||u.pan_number)?`
+      <div class="sec-head"><div class="sec-title">Compliance</div><span class="t-caption">StaffUpdate fields</span></div>
+      <div class="card mb-4"><div class="dl">
+        ${u.pf_number?`<div class="dl-row"><span class="dl-key">PF number</span><span class="dl-val t-code">${u.pf_number}</span></div>`:''}
+        ${u.esi_number?`<div class="dl-row"><span class="dl-key">ESI number</span><span class="dl-val t-code">${u.esi_number}</span></div>`:''}
+        ${u.pan_number?`<div class="dl-row"><span class="dl-key">PAN</span><span class="dl-val t-code">${u.pan_number}</span></div>`:''}
+      </div></div>`:''}
+
       <div class="sec-head"><div class="sec-title">Role & access</div>${this.S.can(this.S.PERMS.ROLE_VIEW)?`<button class="sec-link" onclick="App.openRole('${r?r.id:''}')">View role</button>`:''}</div>
       <div class="card mb-4">
         <div class="flex between items-center mb-3"><div class="row-title">${r?r.name:'—'}</div><span class="chip chip-brand">${r?r.perms.length:0} permissions</span></div>
@@ -921,10 +1583,23 @@ const App = {
     this._backTo=editing?'staffDetail':'staffList';
     // working draft
     this._staffDraft = existing ? {
-      name:existing.name,email:existing.email,password:existing.passwordSet?'••••••••':'',
-      designation:existing.designation,department:existing.department||'',
-      reportsToId:existing.reportsToId||'',roleId:existing.roleId,section:existing.section||''
-    } : { name:'',email:'',password:'',designation:'',department:'',reportsToId:'',roleId:this.S.roleByCode('TEACHER').id,section:'' };
+      name:existing.name||existing.full_name||'', email:existing.email||'',
+      password:existing.passwordSet?'••••••••':'',
+      designation:existing.designation||'', department:existing.department||'',
+      reportsToId:existing.reportsToId||existing.reporting_to_user_public_id||'',
+      roleId:existing.roleId, section:existing.section||'',
+      employee_code:existing.employee_code||'',
+      date_of_joining:existing.date_of_joining||'',
+      employment_type:existing.employment_type||'full_time',
+      phone_number:existing.phone_number||'',
+      branch_public_id:existing.branch_public_id||'BR-01',
+    } : {
+      name:'', email:'', password:'', designation:'', department:'',
+      reportsToId:'', roleId:this.S.roleByCode('TEACHER').id, section:'',
+      employee_code:'',
+      date_of_joining:new Date().toISOString().split('T')[0],
+      employment_type:'full_time', phone_number:'', branch_public_id:'BR-01',
+    };
     // custom permission overrides start from the selected role's perms
     const role=this.S.roleById(this._staffDraft.roleId);
     this._permDraft = new Set(role?role.perms:[]);
@@ -940,34 +1615,57 @@ const App = {
     const depts=typeof FounderDB!=='undefined'&&FounderDB.departmentNames().length>0 ? FounderDB.departmentNames() : ['Academics','Administration','Finance','Science Lab','Sports'];
     const managers=this.S.staffUsers().filter(u=>!editing||u.id!==this.ctx.id);
     const roles=this.S.roles();
+    const branches=typeof FounderDB!=='undefined'?FounderDB.branches().filter(b=>b.is_active):[];
     return `
+      <div class="sec-head"><div class="sec-title">Identity</div></div>
       <div class="field"><label class="field-label">Full name <span class="req">*</span></label>
-        <input class="input" id="st-name" placeholder="e.g. Priya Sharma" value="${d.name}" oninput="App._staffField('name',this.value)"></div>
+        <input class="input" id="st-name" placeholder="e.g. Priya Sharma" value="${d.name||''}" oninput="App._staffField('name',this.value)"></div>
       <div class="field"><label class="field-label">Login email <span class="req">*</span></label>
         <div class="input-affix"><span style="position:absolute;left:14px;color:var(--text-tertiary);display:grid">${icon('mail')}</span>
-        <input class="input" style="padding-left:42px" id="st-email" type="email" inputmode="email" placeholder="name@school.edu" value="${d.email}" oninput="App._staffField('email',this.value)"></div></div>
-      <div class="field"><label class="field-label">${editing?'Reset login password':'Set login password'} ${editing?'':'<span class="req">*</span>'}</label>
+        <input class="input" style="padding-left:42px" id="st-email" type="email" inputmode="email" placeholder="name@school.edu" value="${d.email||''}" oninput="App._staffField('email',this.value)"></div></div>
+      <div class="field"><label class="field-label">Phone number</label>
+        <input class="input" id="st-phone" type="tel" inputmode="tel" placeholder="+91 98765 43210" value="${d.phone_number||''}" oninput="App._staffField('phone_number',this.value)"></div>
+      <div class="field"><label class="field-label">${editing?'Reset login password':'Set login password'}${editing?'':' <span class="req">*</span>'}</label>
         <div class="input-affix"><span style="position:absolute;left:14px;color:var(--text-tertiary);display:grid">${icon('lock')}</span>
-        <input class="input" style="padding-left:42px" id="st-pass" type="text" placeholder="${editing?'Leave blank to keep current':'Temporary password'}" value="${editing?'':d.password}" oninput="App._staffField('password',this.value)"></div>
+        <input class="input" style="padding-left:42px" id="st-pass" type="text" placeholder="${editing?'Leave blank to keep current':'Temporary password'}" value="${editing?'':d.password||''}" oninput="App._staffField('password',this.value)"></div>
         <div class="field-hint">They'll be asked to change it on first login.</div></div>
+
+      <div class="sec-head"><div class="sec-title">Employment</div><span class="t-caption">Mirrors StaffCreate schema</span></div>
       <div class="field"><label class="field-label">Designation <span class="req">*</span></label>
-        <input class="input" id="st-desig" placeholder="e.g. Class Teacher, Librarian" value="${d.designation}" oninput="App._staffField('designation',this.value)"></div>
+        <input class="input" id="st-desig" placeholder="e.g. Class Teacher, Librarian, Accountant" value="${d.designation||''}" oninput="App._staffField('designation',this.value)"></div>
+      <div class="grid-2">
+        <div class="field"><label class="field-label">Employee code <span class="req">*</span></label>
+          <input class="input t-code" id="st-empcode" placeholder="e.g. EMP-001" value="${d.employee_code||''}" oninput="App._staffField('employee_code',this.value.toUpperCase())" style="text-transform:uppercase">
+          <div class="field-hint">Unique ID for reports.</div></div>
+        <div class="field"><label class="field-label">Date of joining <span class="req">*</span></label>
+          <input class="input" id="st-doj" type="date" value="${d.date_of_joining||new Date().toISOString().split('T')[0]}" oninput="App._staffField('date_of_joining',this.value)"></div>
+      </div>
+      <div class="field"><label class="field-label">Employment type</label>
+        <select class="select" id="st-emptype" onchange="App._staffField('employment_type',this.value)">
+          ${[['full_time','Full-time'],['part_time','Part-time'],['contract','Contract'],['visiting','Visiting']].map(([v,l])=>`<option value="${v}" ${(d.employment_type||'full_time')===v?'selected':''}>${l}</option>`).join('')}
+        </select></div>
       <div class="field"><label class="field-label">Department</label>
         <select class="select" id="st-dept" onchange="App._staffField('department',this.value)">
           <option value="">Select department</option>
-          ${depts.map(x=>`<option ${d.department===x?'selected':''}>${x}</option>`).join('')}</select></div>
+          ${depts.map(x=>`<option ${d.department===x?'selected':''}>${x}</option>`).join('')}
+        </select></div>
+      ${branches.length>0?`<div class="field"><label class="field-label">Branch</label>
+        <select class="select" id="st-branch" onchange="App._staffField('branch_public_id',this.value)">
+          ${branches.map(b=>`<option value="${b.public_id||b.id}" ${(d.branch_public_id||'BR-01')===(b.public_id||b.id)?'selected':''}>${b.branch_name||b.name}</option>`).join('')}
+        </select></div>`:''}
       <div class="field"><label class="field-label">Reports to</label>
         <select class="select" id="st-mgr" onchange="App._staffField('reportsToId',this.value)">
           <option value="">— None (top level) —</option>
-          ${managers.map(u=>`<option value="${u.id}" ${d.reportsToId===u.id?'selected':''}>${u.name} · ${u.designation}</option>`).join('')}</select></div>
+          ${managers.map(u=>`<option value="${u.id}" ${d.reportsToId===u.id?'selected':''}>${u.name} · ${u.designation}</option>`).join('')}
+        </select></div>
 
       <div class="sec-head"><div class="sec-title">Role &amp; permissions</div></div>
       <p class="t-caption mb-3">Pick a role to pre-fill its permissions, then fine-tune below if this person needs something different.</p>
       <div class="field"><label class="field-label">Role <span class="req">*</span></label>
         <select class="select" id="st-role" onchange="App.pickStaffRole(this.value)">
-          ${roles.map(r=>`<option value="${r.id}" ${d.roleId===r.id?'selected':''}>${r.name}${r.system?'':' (custom)'}</option>`).join('')}</select>
+          ${roles.map(r=>`<option value="${r.id}" ${d.roleId===r.id?'selected':''}>${r.name}${r.system?'':' (custom)'}</option>`).join('')}
+        </select>
         <div class="field-hint" id="role-hint">${this._roleHint()}</div></div>
-
       <div id="perm-picker">${this._permPickerMarkup()}</div>
 
       <div id="st-err"></div>
@@ -993,25 +1691,25 @@ const App = {
         ${this._permCustomised?`<button class="btn btn-secondary btn-sm" onclick="App.resetPerms()">Reset to role</button>`:''}
       </div>
       ${this.S.CATALOG.map(m=>{
-        const open=this._permOpenModules.has(m.module);
-        const modOn=m.perms.filter(p=>this._permDraft.has(p[0])).length;
+        const open=this._permOpenModules.has(m.module_code||m.module);
+        const modOn=m.perms.filter(p=>this._permDraft.has(p.code)).length;
         return `<div class="card card-pad-0 mb-2">
-          <div class="row" onclick="App.togglePermModule('${m.module}')" style="cursor:pointer">
+          <div class="row" onclick="App.togglePermModule('${m.module_code||m.module}')" style="cursor:pointer">
             <div class="avatar avatar-sq" style="background:var(--surface-sunken);color:var(--text-secondary)">${icon(m.icon)}</div>
-            <div class="row-main"><div class="row-title" style="font-weight:600">${m.label}</div><div class="row-sub">${modOn} of ${m.perms.length} selected</div></div>
+            <div class="row-main"><div class="row-title" style="font-weight:600">${m.label||m.module_name}</div><div class="row-sub">${modOn} of ${m.perms.length} selected</div></div>
             <span style="transform:rotate(${open?180:0}deg);transition:transform .2s;color:var(--text-tertiary)">${icon('chevronD')}</span>
           </div>
           ${open?`<div style="padding:4px 12px 12px">${m.perms.map(p=>{
-            const checked=this._permDraft.has(p[0]);
-            return `<div class="perm-check ${checked?'on':''}" onclick="App.togglePerm('${p[0]}')">
+            const checked=this._permDraft.has(p.code);
+            return `<div class="perm-check ${checked?'on':''}" onclick="App.togglePerm('${p.code}')">
               <div class="perm-box">${checked?icon('check'):''}</div>
-              <div class="flex-1"><div class="t-label" style="font-weight:500">${p[1]}</div><div class="t-code" style="font-size:11px;color:var(--text-tertiary)">${p[0]}</div></div>
+              <div class="flex-1"><div class="t-label" style="font-weight:500">${p.action}</div><div class="t-code" style="font-size:11px;color:var(--text-tertiary)">${p.code}</div></div>
             </div>`; }).join('')}</div>`:''}
         </div>`; }).join('')}`;
   },
   togglePermModule(mod){ if(this._permOpenModules.has(mod))this._permOpenModules.delete(mod); else this._permOpenModules.add(mod); document.getElementById('perm-picker').innerHTML=this._permPickerMarkup(); },
   togglePerm(code){ if(this._permDraft.has(code))this._permDraft.delete(code); else this._permDraft.add(code); this._permCustomised=true; document.getElementById('perm-picker').innerHTML=this._permPickerMarkup(); },
-  resetPerms(){ const r=this.S.roleById(this._staffDraft.roleId); this._permDraft=new Set(r?r.perms:[]); this._permCustomised=false; document.getElementById('perm-picker').innerHTML=this._permPickerMarkup(); },
+  resetPerms(){ const r=this.S.roleById(this._staffDraft.roleId); this._permDraft=new Set(r?(r.permission_codes||r.perms):[]); this._permCustomised=false; document.getElementById('perm-picker').innerHTML=this._permPickerMarkup(); },
   saveStaff(editing){
     const d=this._staffDraft; const err=document.getElementById('st-err');
     const emailOk=/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(d.email);
@@ -1026,13 +1724,24 @@ const App = {
       roleId=custom.id;
     }
     if(editing){
-      const patch={name:d.name,email:d.email,designation:d.designation,department:d.department,reportsToId:d.reportsToId||null,roleId};
+      const patch={name:d.name,email:d.email,designation:d.designation,department:d.department,
+        employment_type:d.employment_type||'full_time',
+        reporting_to_user_public_id:d.reportsToId||null,
+        reportsToId:d.reportsToId||null,roleId};
       if(d.password && d.password!=='••••••••'){ patch.password=d.password; patch.passwordSet=true; }
       this.S.updateStaff(this.ctx.id,patch);
       UI.toast('Staff updated');
       this.go('staffDetail',{sub:true,id:this.ctx.id,title:'Staff'});
     }else{
-      const u=this.S.addStaff({name:d.name,email:d.email,password:d.password,designation:d.designation,department:d.department,reportsToId:d.reportsToId||null,roleId,section:d.section||null});
+      const u=this.S.addStaff({
+        name:d.name, email:d.email, phone_number:d.phone_number||null,
+        password:d.password, designation:d.designation, department:d.department,
+        reportsToId:d.reportsToId||null, roleId, section:d.section||null,
+        employee_code:d.employee_code||null,
+        date_of_joining:d.date_of_joining||new Date().toISOString().split('T')[0],
+        employment_type:d.employment_type||'full_time',
+        branch_public_id:d.branch_public_id||'BR-01',
+      });
       this._staffCreatedToast(u);
       this.go('staffList');
     }
@@ -1043,39 +1752,212 @@ const App = {
   Roles(el){
     this._backTo='more'; this.ctx.sub=true; this.ctx.title='Roles & permissions';
     this.ctx.subtitle=this.S.roles().length+' roles';
-    this.ctx.action='';
+    this.ctx.action=this.S.can(this.S.PERMS.ROLE_UPDATE)
+      ?`<button class="appbar-btn" onclick="App.newRoleSheet()" aria-label="New role">${icon('plus')}</button>`:'' ;
     document.querySelector('.appbar')?.remove(); document.getElementById('app').insertAdjacentHTML('afterbegin',this.AppBar());
     const roles=this.S.roles();
     el.innerHTML=`
-      <p class="t-caption mb-3">Roles are editable bundles of permissions. Every staff member is assigned a role; a custom role can be created any time.</p>
+      <p class="t-caption mb-3">Roles are editable permission bundles. Every staff member holds a role; a custom role can be created from scratch or cloned from a system role.</p>
       <div class="card card-pad-0 mb-4"><div class="list">
-        ${roles.map(r=>{ const count=this.S.staffUsers().filter(u=>u.roleId===r.id).length; return `<div class="row" onclick="App.openRole('${r.id}')">
-          <div class="avatar avatar-sq" style="background:var(--brand-subtle);color:var(--brand)">${icon('shield')}</div>
-          <div class="row-main"><div class="row-title">${r.name} ${r.system?'':'<span class="chip chip-neutral" style="margin-left:4px">custom</span>'}</div><div class="row-sub">${r.perms.length} permissions · ${count} staff</div></div>
-          <span class="row-chev">${icon('chevronR')}</span></div>`; }).join('')}
-      </div></div>`;
+        ${roles.map(r=>{
+          const count=this.S.staffUsers().filter(u=>u.roleId===(r.public_id||r.id)).length;
+          const perms=(r.permission_codes||r.perms||[]).length;
+          return `<div class="row" onclick="App.openRole('${r.public_id||r.id}')">
+            <div class="avatar avatar-sq" style="background:${r.is_system_role||r.system?'var(--info-subtle)':'var(--brand-subtle)'};color:${r.is_system_role||r.system?'var(--info)':'var(--brand)'}">${icon('shield')}</div>
+            <div class="row-main">
+              <div class="row-title">${r.role_name||r.name}
+                ${!(r.is_system_role||r.system)?'<span class="chip chip-neutral" style="margin-left:4px;font-size:10px">custom</span>':''}
+                ${r.hierarchy_level!==null&&r.hierarchy_level!==undefined?`<span class="t-caption" style="color:var(--text-tertiary)"> L${r.hierarchy_level}</span>`:''}
+              </div>
+              <div class="row-sub">${perms} permissions · ${count} staff</div>
+            </div>
+            <span class="row-chev">${icon('chevronR')}</span></div>`;
+        }).join('')}
+      </div></div>
+      <div class="dashed-card">${icon('shield')} <span class="t-caption">System roles (blue) are templates — editable but not deleteable. Custom roles are fully manageable.</span></div>`;
   },
   openRole(id){ if(!id)return; this.go('roleDetail',{sub:true,id,title:'Role'}); },
   RoleDetail(el){
     const r=this.S.roleById(this.ctx.id); if(!r){ el.innerHTML='<div class="state"><div class="state-title">Not found</div></div>'; return; }
     this._backTo='roles';
-    const canEdit=this.S.can(this.S.PERMS.ROLE_UPDATE) && !r.system; // system roles are read-only in-prototype
-    this.ctx.title=r.name; this.ctx.subtitle=r.system?'System role (read-only)':'Custom role';
+    const isSystem=r.is_system_role||r.system;
+    const canEdit=this.S.can(this.S.PERMS.ROLE_UPDATE);
+    this.ctx.title=r.role_name||r.name;
+    this.ctx.subtitle=isSystem?'System role':'Custom role';
+    this.ctx.action=canEdit?`<button class="appbar-btn" onclick="App.editRoleSheet('${r.public_id||r.id}')" aria-label="Edit">${icon('edit')}</button>`:'';
     document.querySelector('.appbar')?.remove(); document.getElementById('app').insertAdjacentHTML('afterbegin',this.AppBar());
-    const staffCount=this.S.staffUsers().filter(u=>u.roleId===r.id).length;
+    const staffCount=this.S.staffUsers().filter(u=>u.roleId===(r.public_id||r.id)).length;
+    const perms=r.permission_codes||r.perms||[];
     el.innerHTML=`
-      <div class="card mb-4"><div class="dl">
-        <div class="dl-row"><span class="dl-key">Description</span><span class="dl-val">${r.desc||'—'}</span></div>
-        <div class="dl-row"><span class="dl-key">Permissions</span><span class="dl-val">${r.perms.length}</span></div>
-        <div class="dl-row"><span class="dl-key">Assigned to</span><span class="dl-val">${staffCount} staff</span></div>
-        <div class="dl-row"><span class="dl-key">Type</span><span class="dl-val">${r.system?'System (template)':'Custom'}</span></div>
-      </div></div>
-      <div class="sec-head"><div class="sec-title">Permissions by module</div></div>
-      ${this.S.CATALOG.map(m=>{ const granted=m.perms.filter(p=>r.perms.includes(p[0])); if(granted.length===0)return '';
-        return `<div class="card card-pad-0 mb-2"><div class="row" style="cursor:default"><div class="avatar avatar-sq" style="background:var(--surface-sunken);color:var(--text-secondary)">${icon(m.icon)}</div>
-          <div class="row-main"><div class="row-title" style="font-weight:600">${m.label}</div><div class="row-sub">${granted.map(p=>p[1]).join(' · ')}</div></div>
+      <div class="card card-raised mb-4">
+        <div class="flex between items-center mb-3">
+          <div>
+            <div class="t-h3">${r.role_name||r.name}</div>
+            <div class="row-sub t-code">${r.role_code||r.code}</div>
+          </div>
+          <div class="flex gap-2">
+            ${isSystem?'<span class="chip chip-info">System</span>':'<span class="chip chip-neutral">Custom</span>'}
+            <span class="chip ${r.is_active!==false?'chip-success':'chip-neutral'}">${r.is_active!==false?'Active':'Inactive'}</span>
+          </div>
+        </div>
+        <div class="dl">
+          <div class="dl-row"><span class="dl-key">Description</span><span class="dl-val">${r.description||r.desc||'—'}</span></div>
+          <div class="dl-row"><span class="dl-key">Hierarchy level</span><span class="dl-val">${r.hierarchy_level!==null&&r.hierarchy_level!==undefined?`L${r.hierarchy_level}`:'—'}</span></div>
+          <div class="dl-row"><span class="dl-key">Permissions</span><span class="dl-val t-data">${perms.length}</span></div>
+          <div class="dl-row"><span class="dl-key">Assigned to</span><span class="dl-val">${staffCount} staff member${staffCount!==1?'s':''}</span></div>
+        </div>
+      </div>
+
+      <div class="sec-head">
+        <div class="sec-title">Permissions by module</div>
+        ${canEdit?`<button class="sec-link" onclick="App.editPermissionsSheet('${r.public_id||r.id}')">Edit permissions</button>`:''}
+      </div>
+      ${this.S.CATALOG.map(m=>{ const granted=m.perms.filter(p=>(r.permission_codes||r.perms||[]).includes(p.code)); if(granted.length===0)return '';
+        return `<div class="card card-pad-0 mb-2"><div class="row" style="cursor:default">
+          <div class="avatar avatar-sq" style="background:var(--surface-sunken);color:var(--text-secondary)">${icon(m.icon)}</div>
+          <div class="row-main"><div class="row-title" style="font-weight:600">${m.label||m.module_name}</div><div class="row-sub">${granted.map(p=>p.action).join(' · ')}</div></div>
           <span class="chip chip-brand">${granted.length}</span></div></div>`; }).join('')}
-      ${r.system?`<div class="dashed-card mt-3">${icon('shield')} <span class="t-caption">System template roles are read-only here. To customise access for one person, edit their staff record and fine-tune permissions.</span></div>`:''}`;
+
+      ${canEdit&&!isSystem?`<div class="flex gap-2 mt-4">
+        <button class="btn btn-secondary btn-full" onclick="App.editRoleSheet('${r.public_id||r.id}')">${icon('edit')} Edit details</button>
+        <button class="btn btn-danger-soft btn-full" onclick="App._deleteRole('${r.public_id||r.id}')">${icon('trash')} Delete</button>
+      </div>`:''}
+      ${isSystem?`<div class="dashed-card mt-3">${icon('shield')} <span class="t-caption">System roles cannot be deleted. You can edit their permissions and description, but the role code is immutable.</span></div>`:''}
+    `;
+  },
+
+  /* === NEW ROLE (RoleCreate) === */
+  newRoleSheet(){
+    const {close}=UI.sheet(`
+      <div class="sheet-title">New role</div>
+      <p class="text-secondary mb-4" style="margin-top:-8px">Mirrors POST /roles (RoleCreate)</p>
+      <div class="field"><label class="field-label">Role name <span class="req">*</span></label>
+        <input class="input" id="rl-name" placeholder="e.g. Library Manager, Lab Assistant"></div>
+      <div class="field"><label class="field-label">Role code <span class="req">*</span></label>
+        <input class="input t-code" id="rl-code" placeholder="e.g. LIB_MGR" style="text-transform:uppercase" oninput="this.value=this.value.toUpperCase()">
+        <div class="field-hint">Immutable after creation — used in API calls and audit logs.</div></div>
+      <div class="field"><label class="field-label">Description</label>
+        <textarea class="textarea" id="rl-desc" placeholder="What does this role do?" rows="2"></textarea></div>
+      <div class="field"><label class="field-label">Hierarchy level</label>
+        <input class="input" id="rl-hlevel" type="number" min="1" max="10" placeholder="e.g. 3 (1=highest)">
+        <div class="field-hint">Optional — defines approval chain depth.</div></div>
+      <div class="field"><label class="field-label">Start from a system role</label>
+        <select class="select" id="rl-base">
+          <option value="">— Start from scratch —</option>
+          ${this.S.roles().filter(r=>r.is_system_role||r.system).map(r=>`<option value="${r.public_id||r.id}">${r.role_name||r.name}</option>`).join('')}
+        </select>
+        <div class="field-hint">Pre-fills permissions; you can fine-tune after saving.</div></div>
+      <div id="rl-err"></div>
+      <button class="btn btn-primary btn-full btn-lg mt-3" onclick="App._saveNewRole()">Create role</button>
+    `);
+    this._roleClose=close;
+  },
+  _saveNewRole(){
+    const name=document.getElementById('rl-name').value.trim();
+    const code=document.getElementById('rl-code').value.trim();
+    const desc=document.getElementById('rl-desc').value.trim();
+    const level=parseInt(document.getElementById('rl-hlevel').value)||null;
+    const baseId=document.getElementById('rl-base').value;
+    const err=document.getElementById('rl-err');
+    if(!name||!code){ err.innerHTML=`<div class="field-error mb-2">${icon('alert')} Name and code are required.</div>`; return; }
+    const baseRole=baseId?this.S.roleById(baseId):null;
+    const perms=baseRole?(baseRole.permission_codes||baseRole.perms||[]):[];
+    const result=this.S.addRole({role_name:name,role_code:code,description:desc,hierarchy_level:level,perms});
+    if(result.error){ err.innerHTML=`<div class="field-error mb-2">${icon('alert')} ${result.error}</div>`; return; }
+    this._roleClose&&this._roleClose();
+    this.Roles(document.getElementById('screen'));
+    UI.toast(`"${name}" created`);
+  },
+
+  /* === EDIT ROLE (RoleUpdate) === */
+  editRoleSheet(id){
+    const r=this.S.roleById(id); if(!r) return;
+    const {close}=UI.sheet(`
+      <div class="sheet-title">Edit role</div>
+      <p class="text-secondary mb-4" style="margin-top:-8px">Mirrors PATCH /roles/{id} (RoleUpdate) — role_code is immutable</p>
+      <div class="field"><label class="field-label">Role name</label>
+        <input class="input" id="rl-name" value="${r.role_name||r.name}"></div>
+      <div class="field"><label class="field-label">Role code (read-only)</label>
+        <input class="input t-code" value="${r.role_code||r.code}" disabled style="opacity:0.5"></div>
+      <div class="field"><label class="field-label">Description</label>
+        <textarea class="textarea" id="rl-desc" rows="2">${r.description||r.desc||''}</textarea></div>
+      <div class="field"><label class="field-label">Hierarchy level</label>
+        <input class="input" id="rl-hlevel" type="number" min="1" max="10" value="${r.hierarchy_level??''}"></div>
+      <div class="field" style="display:flex;gap:12px;align-items:center;padding:8px 0">
+        <input type="checkbox" id="rl-active" ${r.is_active!==false?'checked':''} style="width:18px;height:18px;accent-color:var(--brand)">
+        <label for="rl-active" class="field-label" style="margin:0">Role is active</label>
+      </div>
+      <button class="btn btn-primary btn-full btn-lg mt-3" onclick="App._saveRoleEdit('${id}')">Save changes</button>
+    `);
+    this._roleEditClose=close;
+  },
+  _saveRoleEdit(id){
+    const name=document.getElementById('rl-name').value.trim();
+    const desc=document.getElementById('rl-desc').value.trim();
+    const level=parseInt(document.getElementById('rl-hlevel').value)||null;
+    const active=document.getElementById('rl-active').checked;
+    if(!name){ UI.toast('Role name cannot be empty','error'); return; }
+    this.S.updateRole(id,{role_name:name,description:desc,hierarchy_level:level,is_active:active});
+    this._roleEditClose&&this._roleEditClose();
+    this.RoleDetail(document.getElementById('screen'));
+    UI.toast('Role updated');
+  },
+  _deleteRole(id){
+    const r=this.S.roleById(id); if(!r) return;
+    UI.confirm({title:`Delete "${r.role_name||r.name}"?`,
+      message:'Staff assigned this role will lose all permissions immediately. This cannot be undone.',
+      confirmText:'Delete',danger:true
+    }).then(ok=>{
+      if(!ok) return;
+      const result=this.S.deleteRole(id);
+      if(result&&result.error){ UI.toast(result.error,'error'); return; }
+      this.go('roles');
+      UI.toast(`"${r.role_name||r.name}" deleted`);
+    });
+  },
+
+  /* === EDIT PERMISSIONS (RolePermissionsUpdate) === */
+  editPermissionsSheet(id){
+    /* Mirrors PUT /roles/{id}/permissions (RolePermissionsUpdate{permission_codes:[]}) */
+    const r=this.S.roleById(id); if(!r) return;
+    const currentPerms=new Set(r.permission_codes||r.perms||[]);
+    const {close}=UI.sheet(`
+      <div class="sheet-title">Edit permissions</div>
+      <p class="text-secondary mb-4" style="margin-top:-8px">Mirrors PUT /roles/{id}/permissions (RolePermissionsUpdate) — full replace</p>
+      <div class="card card-pad-0 mb-3"><div class="list">
+        ${this.S.CATALOG.map(m=>`
+          <div>
+            <div class="row" style="cursor:pointer;background:var(--surface-sunken)" onclick="this.nextElementSibling.style.display=this.nextElementSibling.style.display==='none'?'block':'none'">
+              <div class="avatar avatar-sq" style="background:transparent;color:var(--text-secondary)">${icon(m.icon)}</div>
+              <div class="row-main"><div class="row-title" style="font-weight:600">${m.label||m.module_name}</div>
+                <div class="row-sub">${m.perms.filter(p=>currentPerms.has(p.code)).length}/${m.perms.length} granted</div></div>
+              <span style="color:var(--text-tertiary)">${icon('chevronD')}</span>
+            </div>
+            <div style="padding:4px 12px 8px">
+              ${m.perms.map(p=>`
+                <label style="display:flex;gap:10px;align-items:flex-start;padding:8px 0;cursor:pointer;border-bottom:1px solid var(--border-subtle)">
+                  <input type="checkbox" class="rp-perm" data-code="${p.code}" ${currentPerms.has(p.code)?'checked':''}
+                    style="margin-top:2px;width:16px;height:16px;accent-color:var(--brand);flex-shrink:0">
+                  <div><div class="t-label" style="font-weight:500">${p.action}</div>
+                    <div class="t-caption" style="color:var(--text-tertiary)">${p.description||p.code}</div></div>
+                </label>`).join('')}
+            </div>
+          </div>`).join('')}
+      </div></div>
+      <div class="flex gap-2 mb-2">
+        <button class="btn btn-secondary btn-sm" onclick="document.querySelectorAll('.rp-perm').forEach(c=>c.checked=true)">Select all</button>
+        <button class="btn btn-secondary btn-sm" onclick="document.querySelectorAll('.rp-perm').forEach(c=>c.checked=false)">Clear all</button>
+      </div>
+      <button class="btn btn-primary btn-full btn-lg mt-2" onclick="App._savePermissions('${id}')">Save permissions</button>
+    `);
+    this._permEditClose=close;
+  },
+  _savePermissions(id){
+    const codes=[...document.querySelectorAll('.rp-perm:checked')].map(el=>el.dataset.code);
+    this.S.updateRolePermissions(id,codes);
+    this._permEditClose&&this._permEditClose();
+    this.RoleDetail(document.getElementById('screen'));
+    UI.toast(`${codes.length} permissions saved (PUT /roles/{id}/permissions)`);
   },
 
   /* ========================================================================
@@ -1150,7 +2032,7 @@ const App = {
 
   /* ---- ACADEMIC STRUCTURE (Principal) — class levels, sections, subjects CRUD ---- */
   AcademicStructure(el){
-    this._backTo='more'; this.ctx.sub=true; this.ctx.title='Academic structure'; this.ctx.subtitle='Classes, sections & subjects';
+    this._backTo='more'; this.ctx.sub=true; this.ctx.title='Academic structure'; this.ctx.subtitle='Full CRUD — 5 entity types';
     document.querySelector('.appbar')?.remove(); document.getElementById('app').insertAdjacentHTML('afterbegin',this.AppBar());
     if(!this.S.can(this.S.PERMS.ACADEMIC_MANAGE)) return this.noPermission(el);
     this._acadTab=this._acadTab||'classLevels';
@@ -1158,67 +2040,355 @@ const App = {
   },
   _academicMarkup(){
     const a=this.S.academic(); const tab=this._acadTab;
-    const tabs=[['classLevels','Class levels',a.classLevels.length],['sections','Sections',a.sections.length],['subjects','Subjects',a.subjects.length]];
-    return `<div class="segmented mb-4">${tabs.map(([k,l,n])=>`<button class="${tab===k?'active':''}" onclick="App.setAcadTab('${k}')">${l} (${n})</button>`).join('')}</div>
-      <div id="acad-list">${this._acadListMarkup()}</div>
-      <button class="btn btn-primary btn-full btn-lg mt-3" onclick="App.addAcadItem()">${icon('plus')} Add ${tab==='classLevels'?'class level':tab==='sections'?'section':'subject'}</button>`;
-  },
-  _acadListMarkup(){
-    const a=this.S.academic(); const tab=this._acadTab; const items=a[tab];
-    if(items.length===0) return `<div class="dashed-card">No ${tab==='classLevels'?'class levels':tab} yet — add the first one below.</div>`;
-    return `<div class="card card-pad-0"><div class="list">${items.map(it=>{
-      let sub='';
-      if(tab==='sections') sub=`${it.classLevel} · Homeroom: ${it.teacher||'Unassigned'}`;
-      else if(tab==='subjects') sub=it.code;
-      return `<div class="row" style="cursor:default"><div class="avatar avatar-sq" style="background:var(--brand-subtle);color:var(--brand)">${icon(tab==='sections'?'users':tab==='subjects'?'building2':'building2')}</div>
-        <div class="row-main"><div class="row-title">${it.name}</div>${sub?`<div class="row-sub">${sub}</div>`:''}</div>
-        <button class="appbar-btn" style="width:36px;height:36px" onclick="App.removeAcadItem('${it.id}')" aria-label="Remove">${icon('trash')}</button></div>`; }).join('')}</div></div>`;
+    const tabs=[
+      ['sessions','Sessions',(a.academicSessions||[]).length],
+      ['programs','Programs',(a.programs||[]).length],
+      ['classLevels','Classes',(a.classLevels||[]).length],
+      ['sections','Sections',(a.sections||[]).length],
+      ['subjects','Subjects',(a.subjects||[]).length],
+    ];
+    return `<div style="overflow-x:auto;-webkit-overflow-scrolling:touch;padding-bottom:4px;margin:0 -16px;padding:0 16px 4px">
+      <div class="filter-row" style="flex-nowrap:nowrap;flex-wrap:nowrap;min-width:max-content;gap:6px;margin-bottom:16px">
+        ${tabs.map(([k,l,n])=>`<button class="filter-chip ${tab===k?'active':''}" style="white-space:nowrap" onclick="App.setAcadTab('${k}')">${l} (${n})</button>`).join('')}
+      </div></div>
+      <div id="acad-content">${this._acadContent()}</div>`;
   },
   setAcadTab(k){ this._acadTab=k; document.getElementById('screen').innerHTML=this._academicMarkup(); },
-  addAcadItem(){
-    const tab=this._acadTab; const S=this.S;
-    if(tab==='classLevels'){
-      const {close}=UI.sheet(`<div class="sheet-title">Add class level</div>
-        <div class="field"><label class="field-label">Name <span class="req">*</span></label><input class="input" id="ac-name" placeholder="e.g. Class 6"></div>
-        <div id="ac-err"></div>
-        <button class="btn btn-primary btn-full" onclick="App.saveAcadItem()">Add</button>`);
-      this._acadClose=close;
-    }else if(tab==='subjects'){
-      const {close}=UI.sheet(`<div class="sheet-title">Add subject</div>
-        <div class="field"><label class="field-label">Name <span class="req">*</span></label><input class="input" id="ac-name" placeholder="e.g. Computer Science"></div>
-        <div class="field"><label class="field-label">Code</label><input class="input" id="ac-code" placeholder="e.g. CS" style="text-transform:uppercase"></div>
-        <div id="ac-err"></div>
-        <button class="btn btn-primary btn-full" onclick="App.saveAcadItem()">Add</button>`);
-      this._acadClose=close;
-    }else{ // sections
-      const a=S.academic(); const teachers=S.staffUsers();
-      const {close}=UI.sheet(`<div class="sheet-title">Add section</div>
-        <div class="field"><label class="field-label">Section name <span class="req">*</span></label><input class="input" id="ac-name" placeholder="e.g. 6-A"></div>
-        <div class="field"><label class="field-label">Class level <span class="req">*</span></label>
-          <select class="select" id="ac-class">${a.classLevels.map(c=>`<option>${c.name}</option>`).join('')}</select></div>
-        <div class="field"><label class="field-label">Homeroom teacher</label>
-          <select class="select" id="ac-teacher"><option value="">— Unassigned —</option>${teachers.map(t=>`<option>${t.name}</option>`).join('')}</select></div>
-        <div id="ac-err"></div>
-        <button class="btn btn-primary btn-full" onclick="App.saveAcadItem()">Add</button>`);
-      this._acadClose=close;
+  _acadContent(){
+    const S=this.S; const a=S.academic(); const tab=this._acadTab;
+
+    if(tab==='sessions'){
+      /* AcademicSessionOut: public_id, session_label, start_date, end_date, is_current, status */
+      const items=a.academicSessions||[];
+      return `${items.length===0?`<div class="dashed-card mb-3">No sessions yet. Add the current academic year first.</div>`
+        :`<div class="card card-pad-0 mb-4"><div class="list">${items.map(s=>`<div class="row" style="cursor:default">
+          <div class="avatar avatar-sq" style="background:${s.is_current?'var(--brand-subtle)':'var(--surface-sunken)'};color:${s.is_current?'var(--brand)':'var(--text-tertiary)'}">${icon('calendar')}</div>
+          <div class="row-main"><div class="row-title">${s.session_label}${s.is_current?' <span class="chip chip-brand" style="font-size:10px">Current</span>':''}</div>
+            <div class="row-sub">${s.start_date} → ${s.end_date} · ${s.status}</div></div>
+          <div class="flex gap-1">
+            <button class="appbar-btn" onclick="App._editSession('${s.public_id||s.id}')" aria-label="Edit">${icon('edit')}</button>
+          </div></div>`).join('')}</div></div>`}
+      <button class="btn btn-primary btn-full" onclick="App._addSession()">${icon('plus')} Add academic session</button>`;
+
+    } else if(tab==='programs'){
+      /* ProgramOut: public_id, program_name, program_code, program_level, is_active */
+      const items=a.programs||[];
+      const levelLabel={pre_primary:'Pre-Primary',primary:'Primary',secondary:'Secondary',higher_secondary:'Higher Secondary',diploma:'Diploma',undergraduate:'UG',postgraduate:'PG',doctoral:'Doctoral',certificate:'Certificate',custom:'Custom'};
+      return `${items.length===0?`<div class="dashed-card mb-3">No programs yet.</div>`
+        :`<div class="card card-pad-0 mb-4"><div class="list">${items.map(p=>`<div class="row" style="cursor:default">
+          <div class="avatar avatar-sq" style="background:${p.is_active?'var(--info-subtle)':'var(--surface-sunken)'};color:${p.is_active?'var(--info)':'var(--text-tertiary)'}">${icon('building2')}</div>
+          <div class="row-main"><div class="row-title">${p.program_name} <span class="t-code" style="font-size:11px">${p.program_code}</span></div>
+            <div class="row-sub">${levelLabel[p.program_level]||p.program_level}${p.duration_unit_count?` · ${p.duration_unit_count} ${p.duration_unit_type||'years'}`:''}</div></div>
+          <div class="flex gap-1">
+            <button class="appbar-btn" onclick="App._editProgram('${p.public_id||p.id}')" aria-label="Edit">${icon('edit')}</button>
+            <button class="appbar-btn" style="color:var(--danger)" onclick="App._deleteProgram('${p.public_id||p.id}')" aria-label="Delete">${icon('trash')}</button>
+          </div></div>`).join('')}</div></div>`}
+      <button class="btn btn-primary btn-full" onclick="App._addProgram()">${icon('plus')} Add program</button>`;
+
+    } else if(tab==='classLevels'){
+      /* ClassLevelOut: public_id, class_name, sequence_order, program_public_id, is_active */
+      const items=[...(a.classLevels||[])].sort((a,b)=>a.sequence_order-b.sequence_order);
+      const progMap=Object.fromEntries((a.programs||[]).map(p=>[p.public_id||p.id,p.program_name]));
+      return `${items.length===0?`<div class="dashed-card mb-3">No class levels yet.</div>`
+        :`<div class="card card-pad-0 mb-4"><div class="list">${items.map(c=>{
+          const subjectCount=((a.classSubjectMappings||{})[c.public_id||c.id]||[]).length;
+          return `<div class="row" style="cursor:default">
+          <div class="avatar avatar-sq" style="background:${c.is_active?'var(--brand-subtle)':'var(--surface-sunken)'};color:${c.is_active?'var(--brand)':'var(--text-tertiary)'}">${icon('building2')}</div>
+          <div class="row-main"><div class="row-title">${c.class_name||c.name} <span class="t-caption" style="color:var(--text-tertiary)">·${c.sequence_order}</span></div>
+            <div class="row-sub">${progMap[c.program_public_id]||'—'} · ${subjectCount} subjects mapped</div></div>
+          <div class="flex gap-1">
+            <button class="appbar-btn" onclick="App._editClassLevel('${c.public_id||c.id}')" aria-label="Edit">${icon('edit')}</button>
+            <button class="appbar-btn" onclick="App._mapSubjects('${c.public_id||c.id}')" aria-label="Subjects" title="Map subjects">${icon('check')}</button>
+            <button class="appbar-btn" style="color:var(--danger)" onclick="App._deleteClassLevel('${c.public_id||c.id}')" aria-label="Delete">${icon('trash')}</button>
+          </div></div>`;
+        }).join('')}</div></div>`}
+      <button class="btn btn-primary btn-full" onclick="App._addClassLevel()">${icon('plus')} Add class level</button>`;
+
+    } else if(tab==='sections'){
+      /* SectionOut: section_name, class_level_public_id, class_teacher_user_public_id, max_capacity */
+      const items=a.sections||[];
+      const teachers=S.staffUsers();
+      const teacherMap=Object.fromEntries(teachers.map(t=>[t.id,t.name]));
+      const clMap=Object.fromEntries((a.classLevels||[]).map(c=>[c.public_id||c.id,c.class_name||c.name]));
+      return `${items.length===0?`<div class="dashed-card mb-3">No sections yet.</div>`
+        :`<div class="card card-pad-0 mb-4"><div class="list">${items.map(s=>`<div class="row" style="cursor:default">
+          <div class="avatar avatar-sq" style="background:${s.is_active?'var(--success-subtle)':'var(--surface-sunken)'};color:${s.is_active?'var(--success)':'var(--text-tertiary)'}">${icon('users')}</div>
+          <div class="row-main"><div class="row-title">${s.section_name||s.name}</div>
+            <div class="row-sub">${clMap[s.class_level_public_id]||s.classLevel||'—'} · ${s.class_teacher_user_public_id?teacherMap[s.class_teacher_user_public_id]||'Teacher':'No class teacher'}${s.max_capacity?` · max ${s.max_capacity}`:''}</div></div>
+          <div class="flex gap-1">
+            <button class="appbar-btn" onclick="App._editSection('${s.public_id||s.id}')" aria-label="Edit">${icon('edit')}</button>
+            <button class="appbar-btn" style="color:var(--danger)" onclick="App._deleteSection('${s.public_id||s.id}')" aria-label="Delete">${icon('trash')}</button>
+          </div></div>`).join('')}</div></div>`}
+      <button class="btn btn-primary btn-full" onclick="App._addSection()">${icon('plus')} Add section</button>`;
+
+    } else { // subjects
+      /* SubjectOut: subject_name, subject_code, is_elective, is_active */
+      const items=a.subjects||[];
+      return `${items.length===0?`<div class="dashed-card mb-3">No subjects yet.</div>`
+        :`<div class="card card-pad-0 mb-4"><div class="list">${items.map(s=>`<div class="row" style="cursor:default">
+          <div class="avatar avatar-sq" style="background:${s.is_active?'var(--info-subtle)':'var(--surface-sunken)'};color:${s.is_active?'var(--info)':'var(--text-tertiary)'}">${icon('building2')}</div>
+          <div class="row-main"><div class="row-title">${s.subject_name||s.name} <span class="t-code" style="font-size:11px">${s.subject_code||s.code}</span></div>
+            <div class="row-sub">${s.is_elective?'Elective':'Core'}${!s.is_active?' · Inactive':''}</div></div>
+          <div class="flex gap-1">
+            <button class="appbar-btn" onclick="App._editSubject('${s.public_id||s.id}')" aria-label="Edit">${icon('edit')}</button>
+            <button class="appbar-btn" style="color:var(--danger)" onclick="App._deleteSubject('${s.public_id||s.id}')" aria-label="Delete">${icon('trash')}</button>
+          </div></div>`).join('')}</div></div>`}
+      <button class="btn btn-primary btn-full" onclick="App._addSubject()">${icon('plus')} Add subject</button>`;
     }
   },
-  saveAcadItem(){
-    const tab=this._acadTab; const name=document.getElementById('ac-name').value.trim();
+
+  /* === SESSION CRUD === */
+  _addSession(){
+    const {close}=UI.sheet(`<div class="sheet-title">Add academic session</div>
+      <p class="text-secondary mb-4" style="margin-top:-8px">Mirrors POST /academic-sessions (AcademicSessionCreate)</p>
+      <div class="field"><label class="field-label">Session label <span class="req">*</span></label>
+        <input class="input" id="ac-slabel" placeholder="e.g. 2027-28"></div>
+      <div class="grid-2">
+        <div class="field"><label class="field-label">Start date <span class="req">*</span></label>
+          <input class="input" id="ac-sstart" type="date"></div>
+        <div class="field"><label class="field-label">End date <span class="req">*</span></label>
+          <input class="input" id="ac-send" type="date"></div>
+      </div>
+      <div class="field" style="display:flex;gap:12px;align-items:center;padding:8px 0">
+        <input type="checkbox" id="ac-scurrent" style="width:18px;height:18px;accent-color:var(--brand)">
+        <label for="ac-scurrent" class="field-label" style="margin:0">Set as current session</label>
+      </div>
+      <div id="ac-err"></div>
+      <button class="btn btn-primary btn-full btn-lg mt-3" onclick="App._saveSession()">Add session</button>`);
+    this._acadClose=close;
+  },
+  _saveSession(){
+    const label=document.getElementById('ac-slabel').value.trim();
+    const start=document.getElementById('ac-sstart').value;
+    const end=document.getElementById('ac-send').value;
     const err=document.getElementById('ac-err');
-    if(!name){ err.innerHTML=`<div class="field-error mb-2">${icon('alert')} Name is required.</div>`; return; }
-    if(tab==='classLevels') this.S.addAcademic('classLevels',{name});
-    else if(tab==='subjects') this.S.addAcademic('subjects',{name,code:(document.getElementById('ac-code').value.trim()||name.slice(0,3).toUpperCase())});
-    else this.S.addAcademic('sections',{name,classLevel:document.getElementById('ac-class').value,teacher:document.getElementById('ac-teacher').value||null});
-    this._acadClose&&this._acadClose();
-    document.getElementById('screen').innerHTML=this._academicMarkup();
-    UI.toast('Added');
+    if(!label||!start||!end){ err.innerHTML=`<div class="field-error mb-2">${icon('alert')} Label, start and end date are required.</div>`; return; }
+    this.S.addAcademicSession({session_label:label,start_date:start,end_date:end,is_current:document.getElementById('ac-scurrent').checked});
+    this._acadClose&&this._acadClose(); this._refreshAcad(); UI.toast('Session added');
   },
-  removeAcadItem(id){
-    UI.confirm({title:'Remove this item?',message:'This cannot be undone in the prototype.',confirmText:'Remove',danger:true}).then(ok=>{
-      if(ok){ this.S.removeAcademic(this._acadTab,id); document.getElementById('screen').innerHTML=this._academicMarkup(); UI.toast('Removed'); }
+  _editSession(id){
+    const s=this.S.academicSessions().find(x=>x.public_id===id||x.id===id); if(!s) return;
+    const {close}=UI.sheet(`<div class="sheet-title">Edit session</div>
+      <div class="field"><label class="field-label">Session label</label>
+        <input class="input" id="ac-slabel" value="${s.session_label}"></div>
+      <div class="field" style="display:flex;gap:12px;align-items:center;padding:8px 0">
+        <input type="checkbox" id="ac-scurrent" ${s.is_current?'checked':''} style="width:18px;height:18px;accent-color:var(--brand)">
+        <label for="ac-scurrent" class="field-label" style="margin:0">Set as current session</label>
+      </div>
+      <button class="btn btn-primary btn-full btn-lg mt-3" onclick="App._saveSessionEdit('${id}')">Save</button>`);
+    this._acadClose=close;
+  },
+  _saveSessionEdit(id){
+    const label=document.getElementById('ac-slabel').value.trim();
+    const isCurrent=document.getElementById('ac-scurrent').checked;
+    if(!label){ UI.toast('Label cannot be empty','error'); return; }
+    this.S.updateAcademicSession(id,{session_label:label,is_current:isCurrent});
+    this._acadClose&&this._acadClose(); this._refreshAcad(); UI.toast('Session updated');
+  },
+
+  /* === PROGRAM CRUD === */
+  _addProgram(){
+    const levels=['pre_primary','primary','secondary','higher_secondary','diploma','undergraduate','postgraduate','doctoral','certificate','custom'];
+    const {close}=UI.sheet(`<div class="sheet-title">Add program</div>
+      <p class="text-secondary mb-4" style="margin-top:-8px">Mirrors POST /programs (ProgramCreate)</p>
+      <div class="field"><label class="field-label">Program name <span class="req">*</span></label>
+        <input class="input" id="ac-pname" placeholder="e.g. Secondary School"></div>
+      <div class="field"><label class="field-label">Code <span class="req">*</span></label>
+        <input class="input t-code" id="ac-pcode" placeholder="e.g. SEC" style="text-transform:uppercase" oninput="this.value=this.value.toUpperCase()"></div>
+      <div class="field"><label class="field-label">Program level <span class="req">*</span></label>
+        <select class="select" id="ac-plevel">${levels.map(l=>`<option value="${l}">${l.replace('_',' ')}</option>`).join('')}</select></div>
+      <div id="ac-err"></div>
+      <button class="btn btn-primary btn-full btn-lg mt-3" onclick="App._saveProgram()">Add program</button>`);
+    this._acadClose=close;
+  },
+  _saveProgram(){
+    const name=document.getElementById('ac-pname').value.trim();
+    const code=document.getElementById('ac-pcode').value.trim();
+    const level=document.getElementById('ac-plevel').value;
+    const err=document.getElementById('ac-err');
+    if(!name||!code){ err.innerHTML=`<div class="field-error mb-2">${icon('alert')} Name and code are required.</div>`; return; }
+    const result=this.S.addProgram({program_name:name,program_code:code,program_level:level});
+    if(result.error){ err.innerHTML=`<div class="field-error mb-2">${icon('alert')} ${result.error}</div>`; return; }
+    this._acadClose&&this._acadClose(); this._refreshAcad(); UI.toast(`"${name}" added`);
+  },
+  _editProgram(id){ const p=this.S.programs().find(x=>x.public_id===id||x.id===id); if(!p) return;
+    const {close}=UI.sheet(`<div class="sheet-title">Edit program</div>
+      <div class="field"><label class="field-label">Program name</label><input class="input" id="ac-pname" value="${p.program_name}"></div>
+      <div class="field" style="display:flex;gap:12px;align-items:center;padding:8px 0">
+        <input type="checkbox" id="ac-pactive" ${p.is_active?'checked':''} style="width:18px;height:18px;accent-color:var(--brand)">
+        <label for="ac-pactive" class="field-label" style="margin:0">Active</label>
+      </div>
+      <button class="btn btn-primary btn-full btn-lg mt-3" onclick="App._saveProgramEdit('${id}')">Save</button>`);
+    this._acadClose=close; },
+  _saveProgramEdit(id){ this.S.updateProgram(id,{program_name:document.getElementById('ac-pname').value.trim()||undefined,is_active:document.getElementById('ac-pactive').checked}); this._acadClose&&this._acadClose(); this._refreshAcad(); UI.toast('Program updated'); },
+  _deleteProgram(id){ UI.confirm({title:'Delete program?',message:'All class levels in this program must be removed first.',confirmText:'Delete',danger:true}).then(ok=>{if(!ok)return;const r=this.S.deleteProgram(id);if(r&&r.error){UI.toast(r.error,'error');return;}this._refreshAcad();UI.toast('Deleted');}); },
+
+  /* === CLASS LEVEL CRUD + SUBJECT MAPPING === */
+  _addClassLevel(){
+    const progs=this.S.programs().filter(p=>p.is_active);
+    const {close}=UI.sheet(`<div class="sheet-title">Add class level</div>
+      <p class="text-secondary mb-4" style="margin-top:-8px">Mirrors POST /class-levels (ClassLevelCreate)</p>
+      <div class="field"><label class="field-label">Class name <span class="req">*</span></label>
+        <input class="input" id="ac-clname" placeholder="e.g. Class 6"></div>
+      <div class="field"><label class="field-label">Program <span class="req">*</span></label>
+        <select class="select" id="ac-clprog">${progs.map(p=>`<option value="${p.public_id||p.id}">${p.program_name}</option>`).join('')}</select></div>
+      <div class="field"><label class="field-label">Sequence order</label>
+        <input class="input" id="ac-clseq" type="number" min="1" placeholder="e.g. 9"></div>
+      <div id="ac-err"></div>
+      <button class="btn btn-primary btn-full btn-lg mt-3" onclick="App._saveClassLevel()">Add</button>`);
+    this._acadClose=close;
+  },
+  _saveClassLevel(){
+    const name=document.getElementById('ac-clname').value.trim(); const err=document.getElementById('ac-err');
+    if(!name){ err.innerHTML=`<div class="field-error mb-2">${icon('alert')} Class name is required.</div>`; return; }
+    this.S.addClassLevel({class_name:name,program_public_id:document.getElementById('ac-clprog').value,sequence_order:parseInt(document.getElementById('ac-clseq').value)||undefined});
+    this._acadClose&&this._acadClose(); this._refreshAcad(); UI.toast(`"${name}" added`);
+  },
+  _editClassLevel(id){ const c=this.S.classLevelById(id); if(!c) return;
+    const {close}=UI.sheet(`<div class="sheet-title">Edit class level</div>
+      <div class="field"><label class="field-label">Class name</label><input class="input" id="ac-clname" value="${c.class_name||c.name}"></div>
+      <div class="field"><label class="field-label">Sequence order</label><input class="input" id="ac-clseq" type="number" value="${c.sequence_order}"></div>
+      <div class="field" style="display:flex;gap:12px;align-items:center;padding:8px 0">
+        <input type="checkbox" id="ac-clactive" ${c.is_active?'checked':''} style="width:18px;height:18px;accent-color:var(--brand)">
+        <label for="ac-clactive" class="field-label" style="margin:0">Active</label>
+      </div>
+      <button class="btn btn-primary btn-full btn-lg mt-3" onclick="App._saveClassLevelEdit('${id}')">Save</button>`);
+    this._acadClose=close; },
+  _saveClassLevelEdit(id){
+    this.S.updateClassLevel(id,{class_name:document.getElementById('ac-clname').value.trim()||undefined,sequence_order:parseInt(document.getElementById('ac-clseq').value)||undefined,is_active:document.getElementById('ac-clactive').checked});
+    this._acadClose&&this._acadClose(); this._refreshAcad(); UI.toast('Class level updated');
+  },
+  _deleteClassLevel(id){ UI.confirm({title:'Delete class level?',message:'Remove all sections in this class first.',confirmText:'Delete',danger:true}).then(ok=>{if(!ok)return;const r=this.S.deleteClassLevel(id);if(r&&r.error){UI.toast(r.error,'error');return;}this._refreshAcad();UI.toast('Deleted');}); },
+  _mapSubjects(classLevelId){
+    /* PUT /class-levels/{id}/subjects — ClassSubjectMappingReplace{subjects:[{subject_public_id,credit_hours,is_mandatory}]} */
+    const c=this.S.classLevelById(classLevelId); if(!c) return;
+    const allSubs=this.S.subjects().filter(s=>s.is_active);
+    const current=this.S.classSubjectsForLevel(classLevelId);
+    const currentMap=Object.fromEntries(current.map(m=>[m.subject_public_id,m]));
+    const {close}=UI.sheet(`
+      <div class="sheet-title">Subjects — ${c.class_name||c.name}</div>
+      <p class="text-secondary mb-4" style="margin-top:-8px">Mirrors PUT /class-levels/{id}/subjects (ClassSubjectMappingReplace)</p>
+      <div id="ac-submap" class="card card-pad-0 mb-3"><div class="list">${allSubs.map(s=>{
+        const mapped=currentMap[s.public_id||s.id];
+        const hrs=mapped?mapped.credit_hours:'0';
+        const mand=mapped?mapped.is_mandatory:false;
+        return `<div class="row" style="cursor:default;flex-wrap:wrap">
+          <div class="row-main"><div class="row-title">${s.subject_name||s.name}</div><div class="row-sub t-code">${s.subject_code||s.code}</div></div>
+          <div style="display:flex;align-items:center;gap:8px">
+            <input type="number" class="input sub-hrs" data-sid="${s.public_id||s.id}" style="width:64px;text-align:center;padding:6px" value="${hrs}" min="0" max="12" placeholder="hrs">
+            <label style="display:flex;align-items:center;gap:4px;font-size:12px;cursor:pointer">
+              <input type="checkbox" class="sub-mand" data-sid="${s.public_id||s.id}" ${mand?'checked':''} style="accent-color:var(--brand)"> Core
+            </label>
+          </div>
+        </div>`;
+      }).join('')}</div></div>
+      <div class="field-hint mb-3">Enter credit hours (0 = not mapped). Check "Core" for mandatory subjects.</div>
+      <button class="btn btn-primary btn-full btn-lg" onclick="App._saveSubjectMapping('${classLevelId}')">Save subject mapping</button>`);
+    this._acadClose=close;
+  },
+  _saveSubjectMapping(classLevelId){
+    const entries=[];
+    document.querySelectorAll('.sub-hrs').forEach(inp=>{
+      const hrs=parseFloat(inp.value)||0;
+      if(hrs>0){
+        const sid=inp.dataset.sid;
+        const mandEl=document.querySelector(`.sub-mand[data-sid="${sid}"]`);
+        entries.push({subject_public_id:sid,credit_hours:String(hrs),is_mandatory:mandEl?mandEl.checked:false});
+      }
     });
+    this.S.replaceClassSubjects(classLevelId,entries);
+    this._acadClose&&this._acadClose(); this._refreshAcad(); UI.toast(`${entries.length} subject(s) mapped`);
   },
+
+  /* === SECTION CRUD === */
+  _addSection(){
+    const classes=this.S.classLevels().filter(c=>c.is_active);
+    const sessions=this.S.academicSessions();
+    const teachers=this.S.staffUsers();
+    if(classes.length===0){ UI.toast('Add at least one class level first','error'); return; }
+    const {close}=UI.sheet(`<div class="sheet-title">Add section</div>
+      <p class="text-secondary mb-4" style="margin-top:-8px">Mirrors POST /sections (SectionCreate)</p>
+      <div class="field"><label class="field-label">Section name <span class="req">*</span></label>
+        <input class="input" id="ac-sname" placeholder="e.g. 3-A, 3-B"></div>
+      <div class="field"><label class="field-label">Class level <span class="req">*</span></label>
+        <select class="select" id="ac-sclass">${classes.map(c=>`<option value="${c.public_id||c.id}">${c.class_name||c.name}</option>`).join('')}</select></div>
+      <div class="field"><label class="field-label">Academic session <span class="req">*</span></label>
+        <select class="select" id="ac-ssess">${sessions.map(s=>`<option value="${s.public_id||s.id}" ${s.is_current?'selected':''}>${s.session_label}</option>`).join('')}</select></div>
+      <div class="field"><label class="field-label">Class teacher</label>
+        <select class="select" id="ac-steacher"><option value="">— Unassigned —</option>${teachers.map(t=>`<option value="${t.id}">${t.name} · ${t.designation}</option>`).join('')}</select></div>
+      <div class="field"><label class="field-label">Max capacity</label>
+        <input class="input" id="ac-scap" type="number" min="1" placeholder="e.g. 40"></div>
+      <div id="ac-err"></div>
+      <button class="btn btn-primary btn-full btn-lg mt-3" onclick="App._saveSection()">Add section</button>`);
+    this._acadClose=close;
+  },
+  _saveSection(){
+    const name=document.getElementById('ac-sname').value.trim(); const err=document.getElementById('ac-err');
+    if(!name){ err.innerHTML=`<div class="field-error mb-2">${icon('alert')} Section name is required.</div>`; return; }
+    this.S.addSection({section_name:name,class_level_public_id:document.getElementById('ac-sclass').value,academic_session_public_id:document.getElementById('ac-ssess').value,class_teacher_user_public_id:document.getElementById('ac-steacher').value||null,max_capacity:parseInt(document.getElementById('ac-scap').value)||null});
+    this._acadClose&&this._acadClose(); this._refreshAcad(); UI.toast(`"${name}" added`);
+  },
+  _editSection(id){ const s=this.S.sections().find(x=>x.public_id===id||x.id===id); if(!s) return;
+    const teachers=this.S.staffUsers();
+    const {close}=UI.sheet(`<div class="sheet-title">Edit section</div>
+      <div class="field"><label class="field-label">Section name</label><input class="input" id="ac-sname" value="${s.section_name||s.name}"></div>
+      <div class="field"><label class="field-label">Class teacher</label>
+        <select class="select" id="ac-steacher"><option value="">— Unassigned —</option>${teachers.map(t=>`<option value="${t.id}" ${s.class_teacher_user_public_id===t.id?'selected':''}>${t.name} · ${t.designation}</option>`).join('')}</select></div>
+      <div class="field"><label class="field-label">Max capacity</label><input class="input" id="ac-scap" type="number" value="${s.max_capacity||''}"></div>
+      <div class="field" style="display:flex;gap:12px;align-items:center;padding:8px 0">
+        <input type="checkbox" id="ac-sactive" ${s.is_active?'checked':''} style="width:18px;height:18px;accent-color:var(--brand)">
+        <label for="ac-sactive" class="field-label" style="margin:0">Active</label>
+      </div>
+      <button class="btn btn-primary btn-full btn-lg mt-3" onclick="App._saveSectionEdit('${id}')">Save</button>`);
+    this._acadClose=close; },
+  _saveSectionEdit(id){ this.S.updateSection(id,{section_name:document.getElementById('ac-sname').value.trim()||undefined,class_teacher_user_public_id:document.getElementById('ac-steacher').value||null,max_capacity:parseInt(document.getElementById('ac-scap').value)||null,is_active:document.getElementById('ac-sactive').checked}); this._acadClose&&this._acadClose(); this._refreshAcad(); UI.toast('Section updated'); },
+  _deleteSection(id){ UI.confirm({title:'Delete section?',message:'This removes the section from the current academic structure.',confirmText:'Delete',danger:true}).then(ok=>{if(!ok)return;this.S.deleteSection(id);this._refreshAcad();UI.toast('Deleted');}); },
+
+  /* === SUBJECT CRUD === */
+  _addSubject(){
+    const {close}=UI.sheet(`<div class="sheet-title">Add subject</div>
+      <p class="text-secondary mb-4" style="margin-top:-8px">Mirrors POST /subjects (SubjectCreate)</p>
+      <div class="field"><label class="field-label">Subject name <span class="req">*</span></label>
+        <input class="input" id="ac-subname" placeholder="e.g. Computer Science"></div>
+      <div class="field"><label class="field-label">Subject code <span class="req">*</span></label>
+        <input class="input t-code" id="ac-subcode" placeholder="e.g. CS" style="text-transform:uppercase" oninput="this.value=this.value.toUpperCase()"></div>
+      <div class="field" style="display:flex;gap:12px;align-items:center;padding:8px 0">
+        <input type="checkbox" id="ac-subelec" style="width:18px;height:18px;accent-color:var(--brand)">
+        <label for="ac-subelec" class="field-label" style="margin:0">Elective (optional subject)</label>
+      </div>
+      <div id="ac-err"></div>
+      <button class="btn btn-primary btn-full btn-lg mt-3" onclick="App._saveSubject()">Add subject</button>`);
+    this._acadClose=close;
+  },
+  _saveSubject(){
+    const name=document.getElementById('ac-subname').value.trim();
+    const code=document.getElementById('ac-subcode').value.trim();
+    const err=document.getElementById('ac-err');
+    if(!name||!code){ err.innerHTML=`<div class="field-error mb-2">${icon('alert')} Name and code are required.</div>`; return; }
+    const result=this.S.addSubject({subject_name:name,subject_code:code,is_elective:document.getElementById('ac-subelec').checked});
+    if(result.error){ err.innerHTML=`<div class="field-error mb-2">${icon('alert')} ${result.error}</div>`; return; }
+    this._acadClose&&this._acadClose(); this._refreshAcad(); UI.toast(`"${name}" added`);
+  },
+  _editSubject(id){ const s=this.S.subjects().find(x=>x.public_id===id||x.id===id); if(!s) return;
+    const {close}=UI.sheet(`<div class="sheet-title">Edit subject</div>
+      <div class="field"><label class="field-label">Subject name</label><input class="input" id="ac-subname" value="${s.subject_name||s.name}"></div>
+      <div class="field" style="display:flex;gap:12px;align-items:center;padding:8px 0">
+        <input type="checkbox" id="ac-subelec" ${s.is_elective?'checked':''} style="width:18px;height:18px;accent-color:var(--brand)">
+        <label for="ac-subelec" class="field-label" style="margin:0">Elective</label>
+      </div>
+      <div class="field" style="display:flex;gap:12px;align-items:center;padding:8px 0">
+        <input type="checkbox" id="ac-subactive" ${s.is_active?'checked':''} style="width:18px;height:18px;accent-color:var(--brand)">
+        <label for="ac-subactive" class="field-label" style="margin:0">Active</label>
+      </div>
+      <button class="btn btn-primary btn-full btn-lg mt-3" onclick="App._saveSubjectEdit('${id}')">Save</button>`);
+    this._acadClose=close; },
+  _saveSubjectEdit(id){ this.S.updateSubject(id,{subject_name:document.getElementById('ac-subname').value.trim()||undefined,is_elective:document.getElementById('ac-subelec').checked,is_active:document.getElementById('ac-subactive').checked}); this._acadClose&&this._acadClose(); this._refreshAcad(); UI.toast('Subject updated'); },
+  _deleteSubject(id){ UI.confirm({title:'Delete subject?',message:'This removes the subject from the catalogue.',confirmText:'Delete',danger:true}).then(ok=>{if(!ok)return;this.S.deleteSubject(id);this._refreshAcad();UI.toast('Deleted');}); },
+
+  _refreshAcad(){ document.getElementById('screen').innerHTML=this._academicMarkup(); },
+  addAcadItem(){ /* compat stub */ },
+  saveAcadItem(){ /* compat stub */ },
+  removeAcadItem(id){ /* compat stub — use typed delete methods */ },
 
   /* ---- prototype user switcher (review affordance, NOT a product feature) ----
      Switches the "logged-in" staff member. Each person carries their assigned

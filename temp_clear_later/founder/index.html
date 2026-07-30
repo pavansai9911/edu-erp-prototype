@@ -18,13 +18,12 @@
 <script src="../shared/data.js"></script>
 <script src="../shared/auth.js"></script>
 <script src="../shared/utils.js"></script>
+<script src="../shared/auth-screens.js"></script>
 <script src="../shared/founder-data.js"></script>
 <script src="../shared/staff-data.js"></script>
 <script>
-/* ============================================================================
-   FOUNDER APP — the BUY surface. "Show with reports, don't tell with text."
-   Rich, visual, premium. Rajesh's 9pm health-check + the reports that sell.
-   ============================================================================ */
+/* FOUNDER APP — the BUY surface. "Show with reports, don't tell with text."
+   Rich, visual, premium. Rajesh's 9pm health-check + the reports that sell. */
 const App = {
   route:'dashboard', ctx:{},
   systemDark:window.matchMedia('(prefers-color-scheme:dark)').matches,
@@ -34,13 +33,29 @@ const App = {
   init(){
     const s=this.F.settings();
     this.applyTheme(s.theme||'violet', s.mode||'system');
-    window.matchMedia('(prefers-color-scheme:dark)').addEventListener('change',e=>{this.systemDark=e.matches;const st=this.F.settings();if((st.mode||'system')==='system')this.applyTheme(st.theme,'system');});
-    // auto-login as the demo founder for prototype convenience
-    if(!Auth.isLoggedIn()){ this._demoLogin(); }
-    this.render();
+    window.matchMedia('(prefers-color-scheme:dark)').addEventListener('change',e=>{
+      this.systemDark=e.matches;
+      const st=this.F.settings();
+      if((st.mode||'system')==='system') this.applyTheme(st.theme,'system');
+    });
+    if(!Auth.isLoggedIn()){ this.renderLogin(); } else { this.render(); }
   },
-  _demoLogin(){
-    sessionStorage.setItem(Auth.SESSION_KEY,JSON.stringify({userId:'FDR-DEMO',name:'Rajesh Kumar',email:'rajesh@sunrise.edu',role:'Founder',app:'founder',orgCode:'SPS-CHN',avatar:'RK',loginTime:new Date().toISOString()}));
+  renderLogin(){
+    AuthScreens.Login(document.getElementById('app'),{
+      app:'founder',
+      title:'Founder Portal',
+      subtitle:'Sign in to manage your school.',
+      badge:'School Owner',
+      badgeIcon:'building',
+      orgCodeVisible:false,
+      demoIdentifier:'rajesh@sunrise.edu',
+      demoPassword:'Founder@123',
+      onSuccess:(user)=>{ this.render(); UI.toast('Welcome back, '+user.name.split(' ')[0]); }
+    });
+  },
+  confirmLogout(){
+    UI.confirm({title:'Sign out?',message:'You will need to sign in again.',confirmText:'Sign out',danger:true})
+      .then(ok=>{ if(ok){ Auth.logout(); this.renderLogin(); } });
   },
   applyTheme(theme,mode){ document.documentElement.dataset.theme=theme; document.documentElement.dataset.mode= mode==='system'?(this.systemDark?'dark':'light'):mode; },
 
@@ -113,6 +128,10 @@ const App = {
       case 'students': return this.Students(el);
       case 'student': return this.StudentDetail(el);
       case 'fees': return this.Fees(el);
+      case 'invoices': return this.Invoices(el);
+      case 'invoice': return this.InvoiceDetail(el);
+      case 'generateInvoices': return this.GenerateInvoices(el);
+      case 'receipt': return this.ReceiptView(el);
       case 'reports': return this.Reports(el);
       case 'report': return this.ReportView(el);
       case 'more': return this.More(el);
@@ -123,14 +142,20 @@ const App = {
       case 'roles': return this.Roles(el);
       case 'roleDetail': return this.RoleDetail(el);
       case 'setup': return this.Setup(el);
+      case 'departments': return this.Departments(el);
+      case 'branches': return this.Branches(el);
+      case 'feeHeads': return this.FeeHeads(el);
+      case 'feeStructures': return this.FeeStructures(el);
+      case 'feeStructure': return this.FeeStructureDetail(el);
       case 'settings': return this.Settings(el);
+      case 'orgProfile': return this.OrgProfile(el);
+      case 'orgSettings': return this.OrgSettings(el);
+      case 'notifications': return this.Notifications(el);
     }
   },
   withLoading(el,sk,build){ el.innerHTML=sk; setTimeout(()=>{ el.innerHTML=build(); if(this._after){this._after();this._after=null;} },this.loadingMs); },
 
-  /* ========================================================================
-     DASHBOARD — the 9pm health check. Visual-first. "Show, don't tell."
-     ======================================================================== */
+  /* DASHBOARD — the 9pm health check. Visual-first. "Show, don't tell." */
   Dashboard(el){
     this._backTo='dashboard';
     this._feePeriod=this._feePeriod||'month';
@@ -243,9 +268,7 @@ const App = {
     </div>`;
   },
 
-  /* ========================================================================
-     STUDENTS — SIS list + detail (4 lazy tabs)
-     ======================================================================== */
+  /* STUDENTS — SIS list + detail (4 lazy tabs) */
   Students(el){
     this._backTo='dashboard'; this._stuSearch=this._stuSearch||''; this._stuFilter=this._stuFilter||'all';
     const sk=`<div class="sk" style="height:48px;margin-bottom:16px"></div>${'<div class="sk-row"><div class="sk sk-circle"></div><div style="flex:1"><div class="sk sk-line" style="width:60%"></div><div class="sk sk-line" style="width:40%"></div></div></div>'.repeat(6)}`;
@@ -287,49 +310,116 @@ const App = {
 
   openStudent(id){ this.go('student',{sub:true,id,tab:'profile',title:'',_back:'students'}); },
   StudentDetail(el){
-    const s=this.F.studentById(this.ctx.id); if(!s){ el.innerHTML='<div class="state"><div class="state-title">Not found</div></div>'; return; }
+    const s=this.F.studentById(this.ctx.id);
+    if(!s){ el.innerHTML='<div class="state"><div class="state-title">Not found</div></div>'; return; }
     this._backTo='students';
-    this.ctx.title=s.name; this.ctx.subtitle=`${s.section} · ${s.admissionNo}`;
-    document.querySelector('.appbar')?.remove(); document.getElementById('app').insertAdjacentHTML('afterbegin',this.AppBar());
+    this.ctx.title=s.name||s.full_name; this.ctx.subtitle=`${s.section} · ${s.admissionNo}`;
+    this.ctx.action=`<button class="appbar-btn" onclick="App.editStudent('${s.id}')" aria-label="Edit">${icon('edit')}</button>`;
+    document.querySelector('.appbar')?.remove();
+    document.getElementById('app').insertAdjacentHTML('afterbegin',this.AppBar());
     const tab=this.ctx.tab||'profile';
     el.innerHTML=`
       <div class="card card-raised mb-4 flex gap-3 items-center">
         <div class="avatar" style="width:56px;height:56px;font-size:18px;background:${avatarColor(s.name)}">${initials(s.name)}</div>
-        <div class="flex-1"><div class="t-h2" style="line-height:1.2">${s.name}</div><div class="row-sub mt-1">${s.gender} · ${s.section} · Roll ${s.roll}</div></div>
+        <div class="flex-1">
+          <div class="t-h2" style="line-height:1.2">${s.name}</div>
+          <div class="row-sub mt-1">${s.gender||'—'} · ${s.section} · Roll ${s.roll}</div>
+          <div class="flex gap-2 mt-2">
+            <span class="chip ${s.lifecycle_status==='active'?'chip-success':'chip-neutral'}"><span class="chip-dot"></span>${s.lifecycle_status||'active'}</span>
+            ${s.blood_group?`<span class="chip chip-neutral">${s.blood_group}</span>`:''}
+          </div>
+        </div>
       </div>
       <div class="tabs mb-4">
-        ${['profile','guardians','attendance','fees'].map(t=>`<button class="${tab===t?'active':''}" onclick="App.stuTab('${t}')">${t[0].toUpperCase()+t.slice(1)}</button>`).join('')}
-      </div><div id="stuTab"></div>`;
+        ${[['profile','Profile'],['guardians','Guardians'],['attendance','Attendance'],['history','History'],['fees','Fees']].map(([k,l])=>`<button class="${tab===k?'active':''}" onclick="App.stuTab('${k}')">${l}</button>`).join('')}
+      </div>
+      <div id="stuTab"></div>`;
     this.renderStuTab(s,tab);
   },
-  stuTab(t){ this.ctx.tab=t; document.querySelectorAll('#screen .tabs button').forEach(b=>b.classList.toggle('active',b.textContent.toLowerCase()===t)); this.renderStuTab(this.F.studentById(this.ctx.id),t); },
+  stuTab(t){ this.ctx.tab=t; document.querySelectorAll('#screen .tabs button').forEach(b=>b.classList.toggle('active',b.textContent.toLowerCase().startsWith(t.slice(0,3)))); this.renderStuTab(this.F.studentById(this.ctx.id),t); },
   renderStuTab(s,t){
     const box=document.getElementById('stuTab'); if(!box)return;
-    // lazy load feel
     box.innerHTML=`<div class="sk" style="height:120px"></div>`;
     setTimeout(()=>{
+      if(!document.getElementById('stuTab')) return; // navigated away
+
       if(t==='profile'){
-        box.innerHTML=`<div class="card"><div class="dl">
+        /* Profile — mirrors StudentOut fields */
+        box.innerHTML=`<div class="card mb-3"><div class="dl">
           <div class="dl-row"><span class="dl-key">Admission no.</span><span class="dl-val t-code">${s.admissionNo}</span></div>
           <div class="dl-row"><span class="dl-key">Section</span><span class="dl-val">${s.section}</span></div>
           <div class="dl-row"><span class="dl-key">Roll number</span><span class="dl-val">${s.roll}</span></div>
-          <div class="dl-row"><span class="dl-key">Gender</span><span class="dl-val">${s.gender}</span></div>
-          <div class="dl-row"><span class="dl-key">Joined</span><span class="dl-val">${fmt.date(s.joinedAt)}</span></div>
-          <div class="dl-row"><span class="dl-key">Status</span><span class="dl-val"><span class="chip chip-success"><span class="chip-dot"></span>Active</span></span></div>
-        </div></div>`;
+          <div class="dl-row"><span class="dl-key">Date of birth</span><span class="dl-val">${s.dob||'—'}</span></div>
+          <div class="dl-row"><span class="dl-key">Gender</span><span class="dl-val">${s.gender||'—'}</span></div>
+          <div class="dl-row"><span class="dl-key">Blood group</span><span class="dl-val">${s.blood_group||'—'}</span></div>
+          <div class="dl-row"><span class="dl-key">Residency type</span><span class="dl-val">${(s.residency_type||'day_scholar').replace('_',' ')}</span></div>
+          <div class="dl-row"><span class="dl-key">Lifecycle status</span><span class="dl-val"><span class="chip ${s.lifecycle_status==='active'?'chip-success':'chip-neutral'}">${s.lifecycle_status||'active'}</span></span></div>
+          <div class="dl-row"><span class="dl-key">Enrolled</span><span class="dl-val">${fmt.date(s.joinedAt)}</span></div>
+        </div></div>
+        <button class="btn btn-secondary btn-full" onclick="App.editStudent('${s.id}')">${icon('edit')} Edit student details</button>`;
+
       } else if(t==='guardians'){
-        box.innerHTML=`<div class="card card-pad-0"><div class="list"><div class="row" style="cursor:default">
-          <div class="avatar" style="background:${avatarColor(s.guardian.name)}">${initials(s.guardian.name)}</div>
-          <div class="row-main"><div class="row-title">${s.guardian.name}</div><div class="row-sub">${s.guardian.relation} · ${s.guardian.phone}</div></div>
-        </div></div></div>
-        <div class="dashed-card mt-3">${icon('users')} <span class="t-caption">Guardian logins unlock with the Parent app (Pro plan)</span></div>`;
+        /* Guardians — real CRUD using GuardianOut / GuardianCreate */
+        const gds=this.F.guardians(s.id);
+        box.innerHTML=`
+          ${gds.length===0?`<div class="dashed-card mb-4">${icon('users')} <span class="t-caption">No guardians added yet.</span></div>`
+            :`<div class="card card-pad-0 mb-4"><div class="list">${gds.map(g=>`
+            <div class="row" style="cursor:default">
+              <div class="avatar" style="background:${avatarColor(g.full_name)}">${initials(g.full_name)}</div>
+              <div class="row-main">
+                <div class="row-title">${g.full_name} ${g.is_primary_contact?`<span class="chip chip-brand" style="font-size:10px;margin-left:4px">Primary</span>`:''}</div>
+                <div class="row-sub">${g.relationship_type} · ${g.phone_number}</div>
+                ${g.email?`<div class="row-sub">${g.email}</div>`:''}
+              </div>
+              <button class="appbar-btn" onclick="App.removeGuardian('${s.id}','${g.guardian_public_id}')" aria-label="Remove">${icon('trash')}</button>
+            </div>`).join('')}</div></div>`}
+          <button class="btn btn-primary btn-full" onclick="App.addGuardianSheet('${s.id}')">${icon('plus')} Add guardian</button>
+          <div class="dashed-card mt-3">${icon('sparkle')} <span class="t-caption">Guardian login via the Parent app (Pro plan)</span></div>`;
+
       } else if(t==='attendance'){
-        const pct=88+(s.id.charCodeAt(6)%10);
-        box.innerHTML=`<div class="card mb-3 text-center">
-          <div class="t-data-lg" style="color:var(--viz-positive);font-size:32px">${pct}%</div>
-          <div class="t-caption">attendance this term</div></div>
-          <div class="card"><div class="flex between mb-2"><span class="t-label">Present</span><span class="t-data" style="font-weight:700">${Math.round(pct*1.1)} days</span></div>
-          <div class="flex between"><span class="t-label">Absent</span><span class="t-data" style="font-weight:700;color:var(--viz-negative)">${Math.round((100-pct)*0.6)} days</span></div></div>`;
+        /* Attendance — reads real cross-app data from StaffDB attendance store */
+        const att=this.F.studentAttendanceSummary(s.id);
+        if(att.total_count===0){
+          box.innerHTML=`<div class="state" style="min-height:30vh"><div class="state-ill">${icon('check')}</div><div class="state-title">No attendance marked yet</div><div class="state-msg">Attendance for this student will appear here after a teacher marks it in the Staff app.</div></div>`;
+        } else {
+          const bars=[
+            ['Present','P',att.present_count,'var(--viz-positive)'],
+            ['Absent','A',att.absent_count,'var(--viz-negative)'],
+            ['Late','Lt',att.late_count,'var(--viz-warning)'],
+            ['Half-day','H',att.half_day_count,'var(--info)'],
+            ['Excused','E',att.excused_count,'var(--text-tertiary)'],
+          ].filter(b=>b[2]>0);
+          box.innerHTML=`
+            <div class="card card-raised mb-4 text-center">
+              <div style="font-size:42px;font-weight:800;color:${att.percentage>=75?'var(--viz-positive)':att.percentage>=60?'var(--viz-warning)':'var(--viz-negative)'}">${att.percentage}%</div>
+              <div class="t-caption">attendance · ${att.total_count} day(s) marked</div>
+            </div>
+            <div class="card mb-4"><div class="dl">
+              ${bars.map(([label,,count,color])=>`<div class="dl-row"><span class="dl-key">${label}</span>
+                <div class="flex items-center gap-3 flex-1" style="justify-content:flex-end">
+                  <div style="flex:1;height:6px;background:var(--surface-sunken);border-radius:99px;overflow:hidden;max-width:80px"><div style="width:${Math.round(count/att.total_count*100)}%;height:100%;background:${color};border-radius:99px"></div></div>
+                  <span class="dl-val" style="min-width:20px;text-align:right">${count}</span>
+                </div></div>`).join('')}
+            </div></div>`;
+        }
+
+      } else if(t==='history'){
+        /* Enrollment history — mirrors EnrollmentHistoryOut */
+        const hist=this.F.enrollmentHistory(s.id);
+        if(hist.length===0){
+          box.innerHTML=`<div class="state" style="min-height:30vh"><div class="state-ill">${icon('clock')}</div><div class="state-title">No history yet</div><div class="state-msg">Enrollment history appears here after the first academic session closes.</div></div>`;
+        } else {
+          box.innerHTML=`<div class="card card-pad-0"><div class="list">${hist.map((h,i)=>`
+            <div class="row" style="cursor:default">
+              <div class="avatar avatar-sq" style="background:${i===0?'var(--brand-subtle)':'var(--surface-sunken)'};color:${i===0?'var(--brand)':'var(--text-tertiary)'}">${icon('clock')}</div>
+              <div class="row-main">
+                <div class="row-title">${h.session_label||h.academic_session_public_id}</div>
+                <div class="row-sub">Section ${h.section_name||h.section_public_id} · Roll ${h.roll_number||'—'}</div>
+              </div>
+              <span class="chip ${h.enrollment_status==='active'?'chip-success':'chip-neutral'}">${h.enrollment_status}</span>
+            </div>`).join('')}</div></div>`;
+        }
+
       } else if(t==='fees'){
         const inv=this.F.invoiceForStudent(s.id); const pays=this.F.paymentsForStudent(s.id);
         box.innerHTML=`
@@ -342,15 +432,106 @@ const App = {
             </div>
           </div>
           ${s.concession>0?`<div class="dashed-card mb-3" style="border-color:var(--viz-positive);color:var(--viz-positive)">${icon('check')} ${Math.round(s.concession*100)}% concession applied on tuition</div>`:''}
-          ${pays.length?`<div class="sec-head"><div class="sec-title">Payments</div></div><div class="card card-pad-0"><div class="list">${pays.map(p=>`<div class="row" style="cursor:default"><div class="avatar avatar-sq" style="background:var(--success-subtle);color:var(--success)">${icon('wallet')}</div><div class="row-main"><div class="row-title">${fmt.money(p.amount)}</div><div class="row-sub">${p.mode} · ${fmt.date(p.at)} · ${p.id}</div></div></div>`).join('')}</div></div>`:'<div class="dashed-card">No payments recorded yet</div>'}
+          ${pays.length?`<div class="sec-head"><div class="sec-title">Payments</div></div><div class="card card-pad-0"><div class="list">${pays.map(pay=>`<div class="row" style="cursor:default"><div class="avatar avatar-sq" style="background:var(--success-subtle);color:var(--success)">${icon('wallet')}</div><div class="row-main"><div class="row-title">${fmt.money(pay.amount)}</div><div class="row-sub">${pay.mode} · ${fmt.date(pay.at)} · ${pay.id}</div></div></div>`).join('')}</div></div>`:'<div class="dashed-card">No payments recorded yet</div>'}
         `;
       }
     },300);
   },
 
-  /* ========================================================================
-     FEES — the money wedge, Founder view. Flexible ledger made visible.
-     ======================================================================== */
+  /* ---- Edit student (StudentUpdate fields) ---- */
+  editStudent(id){
+    const s=this.F.studentById(id);
+    const {close}=UI.sheet(`
+      <div class="sheet-title">Edit student</div>
+      <div class="field"><label class="field-label">Full name</label>
+        <input class="input" id="stu-name" value="${s.name||''}"></div>
+      <div class="field"><label class="field-label">Gender</label>
+        <select class="select" id="stu-gender">
+          <option value="">— Select —</option>
+          ${['Male','Female','Other'].map(g=>`<option ${(s.gender||'')==g?'selected':''}>${g}</option>`).join('')}
+        </select></div>
+      <div class="field"><label class="field-label">Blood group</label>
+        <select class="select" id="stu-blood">
+          <option value="">— Select —</option>
+          ${['A+','A-','B+','B-','O+','O-','AB+','AB-'].map(bg=>`<option ${(s.blood_group||'')==bg?'selected':''}>${bg}</option>`).join('')}
+        </select></div>
+      <div class="field"><label class="field-label">Lifecycle status</label>
+        <select class="select" id="stu-status">
+          ${['active','on_leave','transferred','withdrawn','graduated'].map(st=>`<option ${(s.lifecycle_status||'active')==st?'selected':''} value="${st}">${st.replace('_',' ')}</option>`).join('')}
+        </select></div>
+      <button class="btn btn-primary btn-full btn-lg" onclick="App._saveStudentEdit('${id}')">Save changes</button>
+    `);
+    this._stuEditClose=close;
+  },
+  _saveStudentEdit(id){
+    const patch={
+      full_name:document.getElementById('stu-name').value.trim()||undefined,
+      gender:document.getElementById('stu-gender').value||undefined,
+      blood_group:document.getElementById('stu-blood').value||undefined,
+      lifecycle_status:document.getElementById('stu-status').value||undefined,
+    };
+    this.F.updateStudent(id,patch);
+    this._stuEditClose&&this._stuEditClose();
+    this.StudentDetail(document.getElementById('screen'));
+    UI.toast('Student updated');
+  },
+
+  /* ---- Add guardian (GuardianCreate fields) ---- */
+  addGuardianSheet(studentId){
+    const {close}=UI.sheet(`
+      <div class="sheet-title">Add guardian</div>
+      <div class="field"><label class="field-label">Full name <span class="req">*</span></label>
+        <input class="input" id="grd-name" placeholder="e.g. Ramesh Kumar"></div>
+      <div class="field"><label class="field-label">Relationship <span class="req">*</span></label>
+        <select class="select" id="grd-rel">
+          <option value="">— Select —</option>
+          ${['father','mother','guardian','other'].map(r=>`<option value="${r}">${r[0].toUpperCase()+r.slice(1)}</option>`).join('')}
+        </select></div>
+      <div class="field"><label class="field-label">Phone number <span class="req">*</span></label>
+        <input class="input" id="grd-phone" type="tel" placeholder="+91 98765 43210"></div>
+      <div class="field"><label class="field-label">Email</label>
+        <input class="input" id="grd-email" type="email" placeholder="optional"></div>
+      <div class="field"><label class="field-label">Occupation</label>
+        <input class="input" id="grd-occ" placeholder="e.g. Engineer"></div>
+      <div class="field" style="display:flex;gap:12px;align-items:center">
+        <input type="checkbox" id="grd-primary" style="width:18px;height:18px;accent-color:var(--brand)">
+        <label for="grd-primary" class="field-label" style="margin:0">Set as primary contact</label>
+      </div>
+      <div id="grd-err"></div>
+      <button class="btn btn-primary btn-full btn-lg mt-3" onclick="App._saveGuardian('${studentId}')">Add guardian</button>
+    `);
+    this._grdClose=close;
+  },
+  _saveGuardian(studentId){
+    const name=document.getElementById('grd-name').value.trim();
+    const rel=document.getElementById('grd-rel').value;
+    const phone=document.getElementById('grd-phone').value.trim();
+    const err=document.getElementById('grd-err');
+    if(!name||!rel||!phone){
+      err.innerHTML=`<div class="field-error mb-2">${icon('alert')} Name, relationship, and phone are required.</div>`; return;
+    }
+    this.F.addGuardian(studentId,{
+      full_name:name, relationship_type:rel, phone_number:phone,
+      email:document.getElementById('grd-email').value.trim()||null,
+      occupation:document.getElementById('grd-occ').value.trim()||null,
+      is_primary_contact:document.getElementById('grd-primary').checked
+    });
+    this._grdClose&&this._grdClose();
+    this.ctx.tab='guardians';
+    this.StudentDetail(document.getElementById('screen'));
+    UI.toast('Guardian added');
+  },
+  removeGuardian(studentId,guardianId){
+    UI.confirm({title:'Remove guardian?',message:'This guardian will be removed from the student\'s record.',confirmText:'Remove',danger:true}).then(ok=>{
+      if(!ok)return;
+      this.F.removeGuardian(studentId,guardianId);
+      this.ctx.tab='guardians';
+      this.StudentDetail(document.getElementById('screen'));
+      UI.toast('Guardian removed');
+    });
+  },
+
+  /* FEES — the money wedge, Founder view. Flexible ledger made visible. */
   Fees(el){
     this._backTo='dashboard';
     const sk=`<div class="sk" style="height:120px;border-radius:14px;margin-bottom:16px"></div><div class="sk" style="height:180px;border-radius:14px"></div>`;
@@ -390,19 +571,248 @@ const App = {
 
         <!-- DEFAULTERS -->
         <div class="sec-head"><div class="sec-title">Top outstanding</div><button class="sec-link" onclick="App.go('reports')">Full report</button></div>
-        <div class="card card-pad-0"><div class="list">${defaulters.map(d=>`<div class="row" onclick="App.openStudent('${d.studentId}')">
+        <div class="card card-pad-0 mb-4"><div class="list">${defaulters.map(d=>`<div class="row" onclick="App.openStudent('${d.studentId}')">
           <div class="avatar" style="background:${avatarColor(d.studentName)}">${initials(d.studentName)}</div>
           <div class="row-main"><div class="row-title">${d.studentName}</div><div class="row-sub">${d.section} · ${d.status}</div></div>
           <div class="row-trail"><span class="t-data" style="font-weight:700;color:var(--viz-negative)">${fmt.money(d.due)}</span></div>
           <span class="row-chev">${icon('chevronR')}</span></div>`).join('')}</div></div>
-        <p class="t-caption text-center mt-3">You view collections here. Your accountant records them in the Staff app.</p>
+
+        <div class="sec-head"><div class="sec-title">Invoice actions</div></div>
+        <div class="card card-pad-0 mb-2"><div class="list">
+          <div class="row" onclick="App.go('invoices')">
+            <div class="avatar avatar-sq" style="background:var(--brand-subtle);color:var(--brand)">${icon('mail')}</div>
+            <div class="row-main"><div class="row-title">All invoices</div><div class="row-sub">${fs.count} invoices · ${fs.paid} paid · ${fs.partial+fs.unpaid} pending</div></div>
+            <span class="row-chev">${icon('chevronR')}</span></div>
+          <div class="row" onclick="App.go('generateInvoices')">
+            <div class="avatar avatar-sq" style="background:var(--success-subtle);color:var(--success)">${icon('trend')}</div>
+            <div class="row-main"><div class="row-title">Generate invoices</div><div class="row-sub">Batch-create invoices from a fee structure</div></div>
+            <span class="row-chev">${icon('chevronR')}</span></div>
+        </div></div>
+        <p class="t-caption text-center mt-3">You view collections here. Your accountant records payments in the Staff app.</p>
       `;
     });
   },
 
-  /* ========================================================================
-     REPORTS — the BUY centerpiece. Form follows data. Real only.
-     ======================================================================== */
+  /* INVOICES LIST  (mirrors GET /fees/invoices?status=&student=)
+     InvoiceOut: invoice_number, total_amount, net_payable_amount, status, issued_date */
+  Invoices(el){
+    this._backTo='fees'; this.ctx.sub=true; this.ctx.title='Invoices'; this.ctx.subtitle='';
+    this.ctx.action=`<button class="appbar-btn" onclick="App.go('generateInvoices')" aria-label="Generate">${icon('plus')}</button>`;
+    document.querySelector('.appbar')?.remove(); document.getElementById('app').insertAdjacentHTML('afterbegin',this.AppBar());
+    this._invFilter=this._invFilter||'all'; this._invSearch=this._invSearch||'';
+    el.innerHTML=this._invoicesMarkup();
+  },
+  _invoicesMarkup(){
+    const all=this.F.invoices();
+    const f=this._invFilter||'all'; const q=(this._invSearch||'').toLowerCase();
+    let list=all.filter(inv=>{
+      const ms=f==='all'||(inv.status||'').toLowerCase()===f.toLowerCase();
+      const mq=!q||inv.studentName.toLowerCase().includes(q)||(inv.invoice_number||'').toLowerCase().includes(q)||(inv.section||'').toLowerCase().includes(q);
+      return ms&&mq;
+    });
+    // status summary for the filter row
+    const summ=this.F.invoiceStatusSummary();
+    const filters=[{k:'all',l:`All (${all.length})`},...summ.map(s=>({k:s.status.toLowerCase(),l:`${s.status} (${s.count})`}))];
+    return `
+      <div class="input-affix mb-3">
+        <span style="position:absolute;left:14px;color:var(--text-tertiary);display:grid">${icon('search')}</span>
+        <input class="input" style="padding-left:42px" placeholder="Search student, invoice no, section…"
+          value="${this._invSearch||''}" oninput="App._invSearch=this.value;document.getElementById('screen').innerHTML=App._invoicesMarkup();" id="inv-search">
+      </div>
+      <div class="filter-row mb-3">
+        ${filters.map(({k,l})=>`<button class="filter-chip ${(this._invFilter||'all')===k?'active':''}" onclick="App._invFilter='${k}';document.getElementById('screen').innerHTML=App._invoicesMarkup()">${l}</button>`).join('')}
+      </div>
+      ${list.length===0
+        ? `<div class="state" style="min-height:36vh"><div class="state-ill">${icon('search')}</div><div class="state-title">No invoices match</div><div class="state-msg">Try clearing the filter or search.</div><button class="btn btn-secondary mt-2" onclick="App._invFilter='all';App._invSearch='';document.getElementById('screen').innerHTML=App._invoicesMarkup()">Clear</button></div>`
+        : `<div class="card card-pad-0"><div class="list">${list.map(inv=>this._invoiceRow(inv)).join('')}</div></div>
+           <p class="t-caption text-center mt-3">${list.length} of ${all.length} invoices</p>`
+      }`;
+  },
+  _invoiceRow(inv){
+    const chip=inv.status==='Paid'?'chip-success':inv.status==='Partial'?'chip-warning':'chip-danger';
+    const bal=inv.total-(inv.paid||0);
+    return `<div class="row" onclick="App.go('invoice',{sub:true,id:'${inv.public_id}'})">
+      <div class="avatar" style="background:${avatarColor(inv.studentName)}">${initials(inv.studentName)}</div>
+      <div class="row-main">
+        <div class="row-title">${inv.studentName}</div>
+        <div class="row-sub">${inv.section} · ${inv.invoice_number||inv.id}</div>
+      </div>
+      <div class="row-trail">
+        <span class="chip ${chip}">${inv.status}</span>
+        ${bal>0?`<div class="t-caption" style="text-align:right;margin-top:2px;color:var(--viz-negative)">${fmt.moneyShort(bal)} due</div>`:''}
+      </div>
+      <span class="row-chev">${icon('chevronR')}</span></div>`;
+  },
+
+  /* INVOICE DETAIL  (mirrors GET /fees/invoices/{id} → InvoiceDetailOut)
+     Shows installments[] with InstallmentDetailOut fields */
+  InvoiceDetail(el){
+    const inv=this.F.invoiceByPublicId(this.ctx.id);
+    if(!inv){ el.innerHTML=`<div class="state"><div class="state-title">Not found</div></div>`; return; }
+    this._backTo='invoices';
+    this.ctx.title=inv.studentName; this.ctx.subtitle=inv.invoice_number||inv.id;
+    document.querySelector('.appbar')?.remove(); document.getElementById('app').insertAdjacentHTML('afterbegin',this.AppBar());
+    const chip=inv.status==='Paid'?'chip-success':inv.status==='Partial'?'chip-warning':'chip-danger';
+    const bal=inv.total-(inv.paid||0);
+    el.innerHTML=`
+      <div class="card card-raised mb-4">
+        <div class="flex between items-center mb-3">
+          <div class="t-h3">${inv.invoice_number||inv.id}</div>
+          <span class="chip ${chip}">${inv.status}</span>
+        </div>
+        <div class="dl">
+          <div class="dl-row"><span class="dl-key">Student</span><span class="dl-val">${inv.studentName}</span></div>
+          <div class="dl-row"><span class="dl-key">Section</span><span class="dl-val">${inv.section}</span></div>
+          <div class="dl-row"><span class="dl-key">Issued</span><span class="dl-val">${fmt.date(inv.issued_date||inv.issuedAt)}</span></div>
+          <div class="dl-row"><span class="dl-key">Total billed</span><span class="dl-val t-data">${fmt.money(parseFloat(inv.total_amount||inv.total))}</span></div>
+          ${parseFloat(inv.discount_amount||0)>0?`<div class="dl-row"><span class="dl-key">Discount</span><span class="dl-val t-data" style="color:var(--viz-positive)">−${fmt.money(parseFloat(inv.discount_amount))}</span></div>`:''}
+          <div class="dl-row"><span class="dl-key">Net payable</span><span class="dl-val t-data" style="font-weight:700">${fmt.money(parseFloat(inv.net_payable_amount||inv.total))}</span></div>
+          ${bal>0?`<div class="dl-row"><span class="dl-key">Outstanding</span><span class="dl-val t-data" style="color:var(--viz-negative)">${fmt.money(bal)}</span></div>`:''}
+        </div>
+      </div>
+
+      <div class="sec-head"><div class="sec-title">Installments</div><span class="t-caption">${(inv.installments||[]).length} installment(s)</span></div>
+      <div class="card card-pad-0 mb-4"><div class="list">
+        ${(inv.installments||[]).map(inst=>{
+          const instChip=inst.status==='paid'?'chip-success':inst.status==='partial'?'chip-warning':'chip-neutral';
+          const instBal=parseFloat(inst.due_amount||0)-parseFloat(inst.paid_amount||0);
+          return `<div class="row" style="flex-wrap:wrap;cursor:default">
+            <div class="avatar avatar-sq" style="background:var(--brand-subtle);color:var(--brand)">${icon('calendar')}</div>
+            <div class="row-main">
+              <div class="row-title">Instalment ${inst.installment_number}</div>
+              <div class="row-sub">Due ${fmt.date(inst.due_date)}</div>
+            </div>
+            <div class="row-trail">
+              <span class="chip ${instChip}">${inst.status}</span>
+              <div class="t-caption" style="text-align:right;margin-top:2px">
+                Paid ${fmt.money(parseFloat(inst.paid_amount||0))} of ${fmt.money(parseFloat(inst.due_amount||0))}
+              </div>
+            </div>
+            ${parseFloat(inst.fine_amount||0)>0?`<div style="width:100%;order:3;padding:4px 0 0 54px"><span class="t-caption" style="color:var(--viz-negative)">Fine: ${fmt.money(parseFloat(inst.fine_amount))}</span></div>`:''}
+          </div>`;
+        }).join('')}
+      </div></div>
+
+      <div class="sec-head"><div class="sec-title">Fee items</div></div>
+      <div class="card card-pad-0 mb-4"><div class="list">
+        ${(inv.items||[]).map(it=>`<div class="row" style="cursor:default">
+          <div class="avatar avatar-sq" style="background:var(--success-subtle);color:var(--success)">${icon('wallet')}</div>
+          <div class="row-main"><div class="row-title">${it.type}</div></div>
+          <div class="t-data" style="font-weight:700">${fmt.money(it.amount)}</div>
+        </div>`).join('')}
+      </div></div>
+
+      ${inv.status!=='Paid'?`<div class="dashed-card">${icon('shield')} <span class="t-caption">Payments are recorded by your accountant in the Staff app and appear here automatically.</span></div>`:''}
+    `;
+  },
+
+  /* GENERATE INVOICES  (mirrors POST /fees/invoices/generate)
+     GenerateInvoicesRequest: structure_public_id, target, installments[] */
+  GenerateInvoices(el){
+    this._backTo='fees'; this.ctx.sub=true; this.ctx.title='Generate invoices'; this.ctx.subtitle='Batch create from a structure';
+    document.querySelector('.appbar')?.remove(); document.getElementById('app').insertAdjacentHTML('afterbegin',this.AppBar());
+    const structs=this.F.feeStructures().filter(s=>s.is_active);
+    if(structs.length===0){
+      el.innerHTML=`<div class="state"><div class="state-ill">${icon('chart')}</div>
+        <div class="state-title">No active fee structures</div>
+        <div class="state-msg">Create and activate a fee structure first, then generate invoices from it.</div>
+        <button class="btn btn-primary mt-2" onclick="App.go('feeStructures')">${icon('plus')} Manage structures</button></div>`;
+      return;
+    }
+    // init draft
+    this._genDraft=this._genDraft||{structId:structs[0].public_id,target:'all',installmentCount:1};
+    const d=this._genDraft;
+    const struct=this.F.feeStructureById(d.structId);
+    const yr=new Date().getFullYear();
+    el.innerHTML=`
+      <p class="text-secondary mb-4">Invoices are created immediately for the selected target students. Duplicates are skipped.</p>
+
+      <div class="field"><label class="field-label">Fee structure <span class="req">*</span></label>
+        <select class="select" id="gen-struct" onchange="App._genDraft.structId=this.value;App._refreshGenPreview()">
+          ${structs.map(s=>`<option value="${s.public_id}" ${d.structId===s.public_id?'selected':''}>${s.structure_name} — ${fmt.money(parseFloat(s.total_amount))}</option>`).join('')}
+        </select></div>
+
+      <div id="gen-preview" class="card mb-4" style="background:var(--brand-subtle);border-color:transparent">
+        ${this._genPreviewMarkup(struct)}
+      </div>
+
+      <div class="field"><label class="field-label">Target <span class="req">*</span></label>
+        <select class="select" id="gen-target" onchange="App._genDraft.target=this.value">
+          <option value="all" ${d.target==='all'?'selected':''}>All students (${this.F.students().length} students)</option>
+          ${(this.S.academic().classLevels||[]).map(c=>`<option value="cl-${c.id}" ${d.target==='cl-'+c.id?'selected':''}>${c.name}</option>`).join('')}
+        </select>
+        <div class="field-hint">Select all students or filter to a specific class level.</div></div>
+
+      <div class="field"><label class="field-label">Installment plan</label>
+        <select class="select" id="gen-inst" onchange="App._genDraft.installmentCount=parseInt(this.value)">
+          <option value="1" ${d.installmentCount===1?'selected':''}>Single payment — due ${yr}-07-01</option>
+          <option value="2" ${d.installmentCount===2?'selected':''}>2 instalments — Q1 &amp; Q3</option>
+          <option value="4" ${d.installmentCount===4?'selected':''}>4 instalments — quarterly</option>
+        </select>
+        <div class="field-hint">Each instalment splits the total by equal fractions.</div></div>
+
+      <div id="gen-err"></div>
+      <button class="btn btn-primary btn-full btn-lg" onclick="App._submitGenerateInvoices()">${icon('check')} Generate invoices</button>
+    `;
+  },
+  _genPreviewMarkup(struct){
+    if(!struct) return `<div class="t-caption">Select a structure above</div>`;
+    return `<div class="t-label" style="font-weight:700;color:var(--brand)">${struct.structure_name}</div>
+      <div class="t-caption">${struct.head_lines.length} fee heads · Total ${fmt.money(parseFloat(struct.total_amount))}</div>
+      <div class="flex gap-2 mt-2" style="flex-wrap:wrap">${struct.head_lines.map(l=>`<span class="chip chip-neutral" style="font-size:10px">${l.fee_head_name} ${fmt.moneyShort(parseFloat(l.amount))}</span>`).join('')}</div>`;
+  },
+  _refreshGenPreview(){
+    const struct=this.F.feeStructureById(this._genDraft.structId);
+    const el=document.getElementById('gen-preview'); if(el) el.innerHTML=this._genPreviewMarkup(struct);
+  },
+  _submitGenerateInvoices(){
+    const d=this._genDraft;
+    const err=document.getElementById('gen-err');
+    if(!d.structId){ err.innerHTML=`<div class="field-error mb-2">${icon('alert')} Select a fee structure.</div>`; return; }
+    // build InstallmentPlanEntry[] from the selected plan
+    const yr=new Date().getFullYear();
+    const plans={
+      1:[{number:1,due_date:`${yr}-07-01`,fraction:1}],
+      2:[{number:1,due_date:`${yr}-07-01`,fraction:0.5},{number:2,due_date:`${yr}-10-01`,fraction:0.5}],
+      4:[{number:1,due_date:`${yr}-07-01`,fraction:0.25},{number:2,due_date:`${yr}-09-01`,fraction:0.25},{number:3,due_date:`${yr}-11-01`,fraction:0.25},{number:4,due_date:`${yr+1}-01-01`,fraction:0.25}],
+    };
+    const installments=plans[d.installmentCount]||plans[1];
+    // build InvoiceGenerationTarget
+    let target={};
+    if(d.target!=='all' && d.target.startsWith('cl-')) target={class_level_public_id:d.target.replace('cl-','')};
+    const result=this.F.generateInvoices({structure_public_id:d.structId,target,installments});
+    if(result.error){ err.innerHTML=`<div class="field-error mb-2">${icon('alert')} ${result.error}</div>`; return; }
+    this._genDraft=null;
+    UI.toast(`${result.created} invoice(s) generated · ${result.total_targeted-result.created} already existed`);
+    this.go('invoices');
+  },
+
+  /* RECEIPT VIEW  (mirrors GET /fees/receipts/{id} → ReceiptOut)
+     ReceiptOut: receipt_code, issued_at, payment{PaymentOut} */
+  ReceiptView(el){
+    const r=this.F.receiptByPublicId(this.ctx.id);
+    if(!r){ el.innerHTML=`<div class="state"><div class="state-title">Receipt not found</div></div>`; return; }
+    this._backTo='invoice'; this.ctx.sub=true; this.ctx.title='Receipt'; this.ctx.subtitle=r.receipt_code;
+    document.querySelector('.appbar')?.remove(); document.getElementById('app').insertAdjacentHTML('afterbegin',this.AppBar());
+    const pay=r.payment||{};
+    el.innerHTML=`
+      <div class="card card-raised mb-4 text-center">
+        <div class="mb-3" style="color:var(--success)">${icon('checkCircle')}</div>
+        <div class="t-h2 mb-1">${fmt.money(parseFloat(pay.payment_amount||pay.amount||0))}</div>
+        <div class="t-caption">Payment recorded</div>
+        <div class="t-code mt-2" style="font-size:13px">${r.receipt_code}</div>
+      </div>
+      <div class="card mb-4"><div class="dl">
+        <div class="dl-row"><span class="dl-key">Student</span><span class="dl-val">${r.studentName||pay.studentName||'—'}</span></div>
+        <div class="dl-row"><span class="dl-key">Amount</span><span class="dl-val t-data" style="color:var(--viz-positive)">${fmt.money(parseFloat(pay.payment_amount||pay.amount||0))}</span></div>
+        <div class="dl-row"><span class="dl-key">Mode</span><span class="dl-val">${pay.payment_mode||pay.mode||'—'}</span></div>
+        ${pay.cheque_number?`<div class="dl-row"><span class="dl-key">Cheque no.</span><span class="dl-val t-code">${pay.cheque_number}</span></div>`:''}
+        <div class="dl-row"><span class="dl-key">Date &amp; time</span><span class="dl-val">${fmt.date(r.issued_at||pay.paid_at)}</span></div>
+        <div class="dl-row"><span class="dl-key">Receipt code</span><span class="dl-val t-code">${r.receipt_code}</span></div>
+      </div></div>
+      <button class="btn btn-secondary btn-full" onclick="App.go('invoice',{sub:true,id:'${r.invoiceId||''}'})">${icon('chevronL')} Back to invoice</button>
+    `;
+  },
   Reports(el){
     this._backTo='dashboard';
     const sk=`${'<div class="card mb-3"><div class="sk sk-line" style="width:40%"></div><div class="sk sk-line" style="width:70%"></div></div>'.repeat(4)}`;
@@ -474,9 +884,7 @@ const App = {
     });
   },
 
-  /* ========================================================================
-     MORE — hub for Staff, Setup, Settings
-     ======================================================================== */
+  /* MORE — hub for Staff, Setup, Settings */
   More(el){
     this._backTo='dashboard';
     const s=Auth.getSession(); const set=this.F.settings();
@@ -585,7 +993,7 @@ const App = {
   },
   _addStaffMarkup(editing){
     const d=this._staffDraft;
-    const depts=['Academics','Administration','Finance','Library','Science Lab','Sports','Transport','Counseling'];
+    const depts=this.F.departmentNames().length>0 ? this.F.departmentNames() : ['Academics','Administration','Finance','Science Lab','Sports'];
     const managers=this.S.staffUsers().filter(u=>!editing||u.id!==this.ctx.id);
     const roles=this.S.roles();
     return `
@@ -674,7 +1082,7 @@ const App = {
     }
     if(editing){
       const patch={name:d.name,email:d.email,designation:d.designation,department:d.department,reportsToId:d.reportsToId||null,roleId};
-      if(d.password && d.password!=='••••••••') patch.passwordSet=true;
+      if(d.password && d.password!=='••••••••'){ patch.password=d.password; patch.passwordSet=true; }
       this.S.updateStaff(this.ctx.id,patch);
       UI.toast('Staff updated');
       this.go('staffDetail',{sub:true,id:this.ctx.id});
@@ -727,42 +1135,831 @@ const App = {
     this._backTo='more'; this.ctx.sub=true; this.ctx.title='School setup'; this.ctx.subtitle='Configure your school';
     document.querySelector('.appbar')?.remove(); document.getElementById('app').insertAdjacentHTML('afterbegin',this.AppBar());
     const set=this.F.settings();
+    const heads=this.F.activeFeeHeads().length;
+    const structs=this.F.feeStructures().filter(s=>s.is_active).length;
+    const depts=this.F.activeDepartments().length;
+    const branches=this.F.branches().filter(b=>b.is_active).length;
     el.innerHTML=`
       <div class="sec-head"><div class="sec-title">School profile</div></div>
       <div class="card card-pad-0 mb-4"><div class="list">
-        ${this.setupRow('building','School name',set.schoolName)}
-        ${this.setupRow('mapPin','Branch','Main Campus')}
-        ${this.setupRow('calendar','Academic year','2026-27')}
+        ${this.setupRow('building2','School name',set.schoolName)}
+        ${this.setupRow('mapPin','Branch','Main Campus · BR-MAIN')}
+        ${this.setupRow('calendar','Academic session','2026-27')}
       </div></div>
-      <div class="sec-head"><div class="sec-title">Fee structure</div><span class="chip chip-brand">Flexible</span></div>
+
+      <div class="sec-head"><div class="sec-title">Organisation structure</div></div>
       <div class="card card-pad-0 mb-4"><div class="list">
-        ${this.feeTypeRow('Tuition','₹18,000 base')}
-        ${this.feeTypeRow('Transport','₹6,000 · optional')}
-        ${this.feeTypeRow('Books & Stationery','₹3,500')}
-        ${this.feeTypeRow('Uniform','₹2,200 · optional')}
-        ${this.feeTypeRow('Activity & Sports','₹1,500')}
+        <div class="row" onclick="App.go('departments')">
+          <div class="avatar avatar-sq" style="background:var(--info-subtle);color:var(--info)">${icon('briefcase')}</div>
+          <div class="row-main"><div class="row-title" style="font-weight:500">Departments</div>
+            <div class="row-sub">${depts} active · Academics, Finance, Administration…</div></div>
+          <span class="row-chev">${icon('chevronR')}</span></div>
+        <div class="row" onclick="App.go('branches')">
+          <div class="avatar avatar-sq" style="background:var(--brand-subtle);color:var(--brand)">${icon('building2')}</div>
+          <div class="row-main"><div class="row-title" style="font-weight:500">Branches</div>
+            <div class="row-sub">${branches} active · campuses and locations</div></div>
+          <span class="row-chev">${icon('chevronR')}</span></div>
       </div></div>
-      <button class="btn btn-secondary btn-full mb-4" onclick="App.notImplemented('Add fee item')">${icon('plus')} Add chargeable item</button>
-      <div class="dashed-card">${icon('sparkle')} Define any chargeable item — books, bags, events, trips. Fees are never limited to tuition.</div>
+
+      <div class="sec-head"><div class="sec-title">Fee configuration</div><span class="chip chip-brand">Flexible ledger</span></div>
+      <div class="card card-pad-0 mb-4"><div class="list">
+        <div class="row" onclick="App.go('feeHeads')">
+          <div class="avatar avatar-sq" style="background:var(--brand-subtle);color:var(--brand)">${icon('wallet')}</div>
+          <div class="row-main"><div class="row-title" style="font-weight:500">Fee heads</div>
+            <div class="row-sub">${heads} active · Tuition, Transport, Books…</div></div>
+          <span class="row-chev">${icon('chevronR')}</span></div>
+        <div class="row" onclick="App.go('feeStructures')">
+          <div class="avatar avatar-sq" style="background:var(--success-subtle);color:var(--success)">${icon('chart')}</div>
+          <div class="row-main"><div class="row-title" style="font-weight:500">Fee structures</div>
+            <div class="row-sub">${structs} active · Head bundles with amounts per class</div></div>
+          <span class="row-chev">${icon('chevronR')}</span></div>
+      </div></div>
+
+      <div class="dashed-card">${icon('sparkle')} <span class="t-caption">Define any chargeable item — books, bags, events, trips. Fees are never limited to tuition.</span></div>
     `;
   },
-  setupRow(ic,label,val){ return `<div class="row" onclick="App.notImplemented('Edit')"><div class="avatar avatar-sq" style="background:var(--brand-subtle);color:var(--brand)">${icon(ic)}</div><div class="row-main"><div class="row-title" style="font-weight:500">${label}</div><div class="row-sub">${val}</div></div><span class="row-chev">${icon('edit')}</span></div>`; },
-  feeTypeRow(name,detail){ return `<div class="row" onclick="App.notImplemented('Edit fee item')"><div class="avatar avatar-sq" style="background:var(--success-subtle);color:var(--success)">${icon('wallet')}</div><div class="row-main"><div class="row-title" style="font-weight:500">${name}</div><div class="row-sub">${detail}</div></div><span class="row-chev">${icon('chevronR')}</span></div>`; },
+  setupRow(ic,label,val){ return `<div class="row" style="cursor:default"><div class="avatar avatar-sq" style="background:var(--brand-subtle);color:var(--brand)">${icon(ic)}</div><div class="row-main"><div class="row-title" style="font-weight:500">${label}</div><div class="row-sub">${val}</div></div></div>`; },
+  feeTypeRow(name,detail){ return `<div class="row" style="cursor:default"><div class="avatar avatar-sq" style="background:var(--success-subtle);color:var(--success)">${icon('wallet')}</div><div class="row-main"><div class="row-title" style="font-weight:500">${name}</div><div class="row-sub">${detail}</div></div></div>`; },
+
+  /* DEPARTMENTS  (mirrors GET/POST/PATCH/DELETE /departments)
+     DepartmentOut fields: public_id, branch_public_id, department_name,
+       department_code, parent_department_public_id,
+       head_user_public_id, is_active */
+  Departments(el){
+    this._backTo='setup'; this.ctx.sub=true; this.ctx.title='Departments'; this.ctx.subtitle='Organisation structure';
+    this.ctx.action=`<button class="appbar-btn" onclick="App.addDeptSheet()" aria-label="Add">${icon('plus')}</button>`;
+    document.querySelector('.appbar')?.remove(); document.getElementById('app').insertAdjacentHTML('afterbegin',this.AppBar());
+    el.innerHTML=this._deptsMarkup();
+  },
+  _deptsMarkup(){
+    const depts=this.F.departments();
+    const active=depts.filter(d=>d.is_active);
+    const inactive=depts.filter(d=>!d.is_active);
+    const staff=typeof StaffDB!=='undefined'?StaffDB.staffUsers():[];
+    const headName=pid=>{ if(!pid) return null; const u=staff.find(s=>s.id===pid); return u?u.name:null; };
+    const parentName=pid=>{ if(!pid) return null; const d=this.F.departmentById(pid); return d?d.department_name:null; };
+    const renderList=list=>`<div class="card card-pad-0 mb-4"><div class="list">${list.map(d=>{
+      const head=headName(d.head_user_public_id);
+      const parent=parentName(d.parent_department_public_id);
+      return `<div class="row" style="cursor:default">
+        <div class="avatar avatar-sq" style="background:${d.is_active?'var(--info-subtle)':'var(--surface-sunken)'};color:${d.is_active?'var(--info)':'var(--text-tertiary)'}">${icon('briefcase')}</div>
+        <div class="row-main">
+          <div class="row-title" style="font-weight:500${d.is_active?'':';color:var(--text-tertiary)'}">${d.department_name} <span class="t-code" style="font-size:11px;font-weight:400">${d.department_code}</span></div>
+          <div class="row-sub">${[head?'Head: '+head:null,parent?'Under: '+parent:null].filter(Boolean).join(' · ')||'No head assigned'}</div>
+        </div>
+        <div class="flex gap-2 items-center">
+          <button class="appbar-btn" onclick="App.editDeptSheet('${d.public_id}')" aria-label="Edit">${icon('edit')}</button>
+          ${d.is_active
+            ? `<button class="appbar-btn" style="color:var(--danger)" onclick="App._deleteDept('${d.public_id}')" aria-label="Delete">${icon('trash')}</button>`
+            : `<button class="btn btn-sm btn-secondary" onclick="App._updateDept('${d.public_id}',{is_active:true})">Activate</button>`}
+        </div>
+      </div>`;
+    }).join('')}</div></div>`;
+    if(depts.length===0) return `
+      <div class="state" style="min-height:35vh">
+        <div class="state-ill">${icon('briefcase')}</div>
+        <div class="state-title">No departments yet</div>
+        <div class="state-msg">Add your first department to organise staff by function — Academics, Finance, Administration, etc.</div>
+      </div>
+      <button class="btn btn-primary btn-full" onclick="App.addDeptSheet()">${icon('plus')} Add department</button>`;
+    return `
+      ${active.length>0?`<div class="sec-head"><div class="sec-title">Active (${active.length})</div></div>${renderList(active)}`:''}
+      ${inactive.length>0?`<div class="sec-head"><div class="sec-title">Inactive (${inactive.length})</div></div>${renderList(inactive)}`:''}
+      <button class="btn btn-primary btn-full" onclick="App.addDeptSheet()">${icon('plus')} Add department</button>
+    `;
+  },
+  addDeptSheet(){
+    const branches=this.F.branches().filter(b=>b.is_active);
+    const parentOptions=this.F.activeDepartments();
+    const staff=typeof StaffDB!=='undefined'?StaffDB.staffUsers():[];
+    const {close}=UI.sheet(`
+      <div class="sheet-title">Add department</div>
+      <div class="field"><label class="field-label">Department name <span class="req">*</span></label>
+        <input class="input" id="dept-name" placeholder="e.g. Academics, Finance, Library"></div>
+      <div class="field"><label class="field-label">Department code <span class="req">*</span></label>
+        <input class="input t-code" id="dept-code" placeholder="e.g. ACAD, FIN" style="text-transform:uppercase" oninput="this.value=this.value.toUpperCase()">
+        <div class="field-hint">Short unique code used in reports.</div></div>
+      <div class="field"><label class="field-label">Branch <span class="req">*</span></label>
+        <select class="select" id="dept-branch">
+          ${branches.map(b=>`<option value="${b.public_id||b.id}">${b.branch_name||b.name}</option>`).join('')}
+        </select></div>
+      ${parentOptions.length>0?`<div class="field"><label class="field-label">Parent department</label>
+        <select class="select" id="dept-parent">
+          <option value="">— None (top level) —</option>
+          ${parentOptions.map(d=>`<option value="${d.public_id}">${d.department_name}</option>`).join('')}
+        </select></div>`:''}
+      ${staff.length>0?`<div class="field"><label class="field-label">Department head</label>
+        <select class="select" id="dept-head">
+          <option value="">— Not assigned —</option>
+          ${staff.map(s=>`<option value="${s.id}">${s.name} · ${s.designation}</option>`).join('')}
+        </select></div>`:''}
+      <div id="dept-err"></div>
+      <button class="btn btn-primary btn-full btn-lg mt-3" onclick="App._saveDept()">Add department</button>
+    `);
+    this._deptClose=close;
+  },
+  _saveDept(){
+    const name=document.getElementById('dept-name').value.trim();
+    const code=document.getElementById('dept-code').value.trim().toUpperCase();
+    const branch=document.getElementById('dept-branch')?.value||'BR-01';
+    const parent=document.getElementById('dept-parent')?.value||null;
+    const head=document.getElementById('dept-head')?.value||null;
+    const err=document.getElementById('dept-err');
+    if(!name||!code){ err.innerHTML=`<div class="field-error mb-2">${icon('alert')} Name and code are required.</div>`; return; }
+    const result=this.F.addDepartment({
+      department_name:name, department_code:code,
+      branch_public_id:branch,
+      parent_department_public_id:parent||null,
+      head_user_public_id:head||null,
+    });
+    if(result.error){ err.innerHTML=`<div class="field-error mb-2">${icon('alert')} ${result.error}</div>`; return; }
+    this._deptClose&&this._deptClose();
+    this.Departments(document.getElementById('screen'));
+    UI.toast(`"${result.department_name}" added`);
+  },
+  editDeptSheet(pid){
+    const d=this.F.departmentById(pid); if(!d) return;
+    const staff=typeof StaffDB!=='undefined'?StaffDB.staffUsers():[];
+    const {close}=UI.sheet(`
+      <div class="sheet-title">Edit department</div>
+      <div class="field"><label class="field-label">Department name</label>
+        <input class="input" id="deptE-name" value="${d.department_name}"></div>
+      ${staff.length>0?`<div class="field"><label class="field-label">Department head</label>
+        <select class="select" id="deptE-head">
+          <option value="">— Not assigned —</option>
+          ${staff.map(s=>`<option value="${s.id}" ${d.head_user_public_id===s.id?'selected':''}>${s.name} · ${s.designation}</option>`).join('')}
+        </select></div>`:''}
+      <button class="btn btn-primary btn-full btn-lg mt-3" onclick="App._updateDeptFromSheet('${pid}')">Save changes</button>
+    `);
+    this._deptEditClose=close;
+  },
+  _updateDeptFromSheet(pid){
+    const name=document.getElementById('deptE-name').value.trim();
+    const head=document.getElementById('deptE-head')?.value||null;
+    if(!name){ UI.toast('Name cannot be empty','error'); return; }
+    this.F.updateDepartment(pid,{department_name:name,head_user_public_id:head||null});
+    this._deptEditClose&&this._deptEditClose();
+    this.Departments(document.getElementById('screen'));
+    UI.toast('Department updated');
+  },
+  _updateDept(pid,patch){
+    this.F.updateDepartment(pid,patch);
+    this.Departments(document.getElementById('screen'));
+  },
+  _deleteDept(pid){
+    const d=this.F.departmentById(pid); if(!d) return;
+    UI.confirm({title:`Delete "${d.department_name}"?`,
+      message:'This removes the department permanently. Staff currently in this department will show no department.',
+      confirmText:'Delete',danger:true
+    }).then(ok=>{
+      if(!ok) return;
+      const result=this.F.deleteDepartment(pid);
+      if(result&&result.error){ UI.toast(result.error,'error'); return; }
+      this.Departments(document.getElementById('screen'));
+      UI.toast(`"${d.department_name}" deleted`);
+    });
+  },
+
+  /* BRANCHES  (mirrors GET/POST /branches + PATCH /branches/{id})
+     BranchOut: public_id, branch_name, branch_code, address fields,
+                country_code, geo_lat, geo_lng, is_active
+     No DELETE endpoint exists in the API — branches are deactivated only. */
+  Branches(el){
+    this._backTo='setup'; this.ctx.sub=true; this.ctx.title='Branches'; this.ctx.subtitle='Campuses & locations';
+    this.ctx.action=`<button class="appbar-btn" onclick="App.addBranchSheet()" aria-label="Add">${icon('plus')}</button>`;
+    document.querySelector('.appbar')?.remove(); document.getElementById('app').insertAdjacentHTML('afterbegin',this.AppBar());
+    el.innerHTML=this._branchesMarkup();
+  },
+  _branchesMarkup(){
+    const branches=this.F.branches();
+    if(branches.length===0) return `
+      <div class="state" style="min-height:35vh">
+        <div class="state-ill">${icon('building2')}</div>
+        <div class="state-title">No branches</div>
+        <div class="state-msg">Add a new campus or location. Every school starts with one main branch.</div>
+      </div>
+      <button class="btn btn-primary btn-full" onclick="App.addBranchSheet()">${icon('plus')} Add branch</button>`;
+    return `
+      <p class="t-caption mb-3">Branches are physical campuses. Each branch has its own departments, staff, and students. The branch switcher at the top of your dashboard filters all reports.</p>
+      <div class="card card-pad-0 mb-4"><div class="list">${branches.map(b=>{
+        const addr=[b.address_line1,b.city,b.state].filter(Boolean).join(', ');
+        return `<div class="row" style="cursor:default">
+          <div class="avatar avatar-sq" style="background:${b.is_active?'var(--brand-subtle)':'var(--surface-sunken)'};color:${b.is_active?'var(--brand)':'var(--text-tertiary)'}">${icon('building2')}</div>
+          <div class="row-main">
+            <div class="row-title" style="font-weight:500">${b.branch_name||b.name} <span class="t-code" style="font-size:11px;font-weight:400">${b.branch_code||b.code}</span></div>
+            <div class="row-sub">${addr||'No address set'}</div>
+          </div>
+          <div class="flex gap-2 items-center">
+            <button class="appbar-btn" onclick="App.editBranchSheet('${b.public_id||b.id}')" aria-label="Edit">${icon('edit')}</button>
+            <span class="chip ${b.is_active?'chip-success':'chip-neutral'}">${b.is_active?'Active':'Inactive'}</span>
+          </div>
+        </div>`;
+      }).join('')}</div></div>
+      <button class="btn btn-primary btn-full" onclick="App.addBranchSheet()">${icon('plus')} Add branch</button>
+      <div class="dashed-card mt-3">${icon('shield')} <span class="t-caption">Branches cannot be deleted — only deactivated. All historical data is preserved.</span></div>
+    `;
+  },
+  addBranchSheet(){
+    const {close}=UI.sheet(`
+      <div class="sheet-title">Add branch</div>
+      <div class="field"><label class="field-label">Branch name <span class="req">*</span></label>
+        <input class="input" id="br-name" placeholder="e.g. North Campus, Velachery Branch"></div>
+      <div class="field"><label class="field-label">Branch code <span class="req">*</span></label>
+        <input class="input t-code" id="br-code" placeholder="e.g. NORTH, VCY" style="text-transform:uppercase" oninput="this.value=this.value.toUpperCase()">
+        <div class="field-hint">Short code used in reports and data exports.</div></div>
+      <div class="field"><label class="field-label">Address</label>
+        <input class="input" id="br-addr" placeholder="Street address"></div>
+      <div class="grid-2">
+        <div class="field"><label class="field-label">City</label>
+          <input class="input" id="br-city" placeholder="Chennai"></div>
+        <div class="field"><label class="field-label">State</label>
+          <input class="input" id="br-state" placeholder="Tamil Nadu"></div>
+      </div>
+      <div class="field"><label class="field-label">Postal code</label>
+        <input class="input" id="br-pin" placeholder="600001" inputmode="numeric"></div>
+      <div id="br-err"></div>
+      <button class="btn btn-primary btn-full btn-lg mt-3" onclick="App._saveBranch()">Add branch</button>
+    `);
+    this._brClose=close;
+  },
+  _saveBranch(){
+    const name=document.getElementById('br-name').value.trim();
+    const code=document.getElementById('br-code').value.trim().toUpperCase();
+    const err=document.getElementById('br-err');
+    if(!name||!code){ err.innerHTML=`<div class="field-error mb-2">${icon('alert')} Branch name and code are required.</div>`; return; }
+    const result=this.F.addBranch({
+      branch_name:name, branch_code:code,
+      address_line1:document.getElementById('br-addr').value.trim()||null,
+      city:document.getElementById('br-city').value.trim()||null,
+      state:document.getElementById('br-state').value.trim()||null,
+      postal_code:document.getElementById('br-pin').value.trim()||null,
+      country_code:'IN',
+    });
+    if(result.error){ err.innerHTML=`<div class="field-error mb-2">${icon('alert')} ${result.error}</div>`; return; }
+    this._brClose&&this._brClose();
+    this.Branches(document.getElementById('screen'));
+    UI.toast(`"${result.branch_name}" added`);
+  },
+  editBranchSheet(pid){
+    const b=this.F.branchById(pid); if(!b) return;
+    const {close}=UI.sheet(`
+      <div class="sheet-title">Edit branch</div>
+      <div class="field"><label class="field-label">Branch name</label>
+        <input class="input" id="brE-name" value="${b.branch_name||b.name||''}"></div>
+      <div class="field"><label class="field-label">Address</label>
+        <input class="input" id="brE-addr" value="${b.address_line1||''}"></div>
+      <div class="grid-2">
+        <div class="field"><label class="field-label">City</label>
+          <input class="input" id="brE-city" value="${b.city||''}"></div>
+        <div class="field"><label class="field-label">State</label>
+          <input class="input" id="brE-state" value="${b.state||''}"></div>
+      </div>
+      <div class="field"><label class="field-label">Postal code</label>
+        <input class="input" id="brE-pin" value="${b.postal_code||''}" inputmode="numeric"></div>
+      <div class="field" style="display:flex;gap:12px;align-items:center;padding:8px 0">
+        <input type="checkbox" id="brE-active" ${b.is_active?'checked':''} style="width:18px;height:18px;accent-color:var(--brand)">
+        <label for="brE-active" class="field-label" style="margin:0">Branch is active</label>
+      </div>
+      <button class="btn btn-primary btn-full btn-lg mt-3" onclick="App._saveBranchEdit('${pid}')">Save changes</button>
+    `);
+    this._brEditClose=close;
+  },
+  _saveBranchEdit(pid){
+    const name=document.getElementById('brE-name').value.trim();
+    if(!name){ UI.toast('Branch name cannot be empty','error'); return; }
+    this.F.updateBranch(pid,{
+      branch_name:name,
+      address_line1:document.getElementById('brE-addr').value.trim()||null,
+      city:document.getElementById('brE-city').value.trim()||null,
+      state:document.getElementById('brE-state').value.trim()||null,
+      postal_code:document.getElementById('brE-pin').value.trim()||null,
+      is_active:document.getElementById('brE-active').checked,
+    });
+    this._brEditClose&&this._brEditClose();
+    this.Branches(document.getElementById('screen'));
+    UI.toast('Branch updated');
+  },
+
+  /* FEE HEADS — mirrors GET /fees/heads + POST /fees/heads
+     FeeHeadOut: head_name, is_refundable, is_active */
+  FeeHeads(el){
+    this._backTo='setup'; this.ctx.sub=true; this.ctx.title='Fee heads'; this.ctx.subtitle='Chargeable item types';
+    this.ctx.action=`<button class="appbar-btn" onclick="App.addFeeHeadSheet()" aria-label="Add">${icon('plus')}</button>`;
+    document.querySelector('.appbar')?.remove(); document.getElementById('app').insertAdjacentHTML('afterbegin',this.AppBar());
+    el.innerHTML=this._feeHeadsMarkup();
+  },
+  _feeHeadsMarkup(){
+    const heads=this.F.feeHeads(); // show all, toggle active/inactive
+    const active=heads.filter(h=>h.is_active); const inactive=heads.filter(h=>!h.is_active);
+    return `
+      <p class="t-caption mb-3">Fee heads are the named types of charges you bill students — Tuition, Transport, Activity fee, etc. Each structure bundles heads with amounts.</p>
+      ${active.length===0?`<div class="state" style="min-height:20vh"><div class="state-ill">${icon('wallet')}</div><div class="state-title">No fee heads yet</div><div class="state-msg">Add your first fee head to start building fee structures.</div></div>`
+        :`<div class="sec-head"><div class="sec-title">Active (${active.length})</div></div>
+        <div class="card card-pad-0 mb-4"><div class="list">${active.map(h=>this._feeHeadRow(h)).join('')}</div></div>`}
+      ${inactive.length>0?`<div class="sec-head"><div class="sec-title">Inactive (${inactive.length})</div></div>
+        <div class="card card-pad-0 mb-4"><div class="list">${inactive.map(h=>this._feeHeadRow(h)).join('')}</div></div>`:''}
+      <button class="btn btn-primary btn-full mt-2" onclick="App.addFeeHeadSheet()">${icon('plus')} Add fee head</button>
+    `;
+  },
+  _feeHeadRow(h){
+    return `<div class="row" style="cursor:default">
+      <div class="avatar avatar-sq" style="background:${h.is_active?'var(--brand-subtle)':'var(--surface-sunken)'};color:${h.is_active?'var(--brand)':'var(--text-tertiary)'}">${icon('wallet')}</div>
+      <div class="row-main">
+        <div class="row-title" style="font-weight:500${h.is_active?'':';color:var(--text-tertiary)'}">${h.head_name}</div>
+        <div class="row-sub">${h.is_refundable?'Refundable':'Non-refundable'}</div>
+      </div>
+      <button class="btn btn-sm btn-secondary" style="flex-shrink:0" onclick="App._toggleFeeHead('${h.public_id}')">
+        ${h.is_active?'Deactivate':'Activate'}
+      </button>
+    </div>`;
+  },
+  addFeeHeadSheet(){
+    const {close}=UI.sheet(`
+      <div class="sheet-title">Add fee head</div>
+      <p class="text-secondary mb-4" style="margin-top:-8px">A fee head is one chargeable item type. You'll set amounts when building a structure.</p>
+      <div class="field"><label class="field-label">Head name <span class="req">*</span></label>
+        <input class="input" id="fh-name" placeholder="e.g. Library Fee, Lab Fee, Sports"></div>
+      <div class="field" style="display:flex;gap:12px;align-items:center;padding:8px 0">
+        <input type="checkbox" id="fh-refund" style="width:18px;height:18px;accent-color:var(--brand)">
+        <label for="fh-refund" class="field-label" style="margin:0">Refundable (e.g. security deposit)</label>
+      </div>
+      <div id="fh-err"></div>
+      <button class="btn btn-primary btn-full btn-lg mt-3" onclick="App._saveFeeHead()">Add fee head</button>
+    `);
+    this._fhClose=close;
+  },
+  _saveFeeHead(){
+    const name=document.getElementById('fh-name').value.trim();
+    const err=document.getElementById('fh-err');
+    if(!name){ err.innerHTML=`<div class="field-error mb-2">${icon('alert')} Fee head name is required.</div>`; return; }
+    const result=this.F.addFeeHead({head_name:name,is_refundable:document.getElementById('fh-refund').checked});
+    if(result.error){ err.innerHTML=`<div class="field-error mb-2">${icon('alert')} ${result.error}</div>`; return; }
+    this._fhClose&&this._fhClose();
+    this.FeeHeads(document.getElementById('screen'));
+    UI.toast(`"${name}" added`);
+  },
+  _toggleFeeHead(id){
+    const h=this.F.toggleFeeHead(id);
+    document.getElementById('screen').innerHTML=this._feeHeadsMarkup();
+    UI.toast(h.is_active?`"${h.head_name}" activated`:`"${h.head_name}" deactivated`);
+  },
+
+  /* FEE STRUCTURES  (mirrors GET/POST /fees/structures)
+     FeeStructureOut: structure_name, head_lines[], total_amount */
+  FeeStructures(el){
+    this._backTo='setup'; this.ctx.sub=true; this.ctx.title='Fee structures'; this.ctx.subtitle='Head bundles with amounts';
+    this.ctx.action=`<button class="appbar-btn" onclick="App.go('feeStructure',{sub:true,id:'new'})" aria-label="Create">${icon('plus')}</button>`;
+    document.querySelector('.appbar')?.remove(); document.getElementById('app').insertAdjacentHTML('afterbegin',this.AppBar());
+    const structs=this.F.feeStructures();
+    if(structs.length===0){
+      el.innerHTML=`<div class="state"><div class="state-ill">${icon('chart')}</div>
+        <div class="state-title">No fee structures yet</div>
+        <div class="state-msg">A structure bundles fee heads with specific amounts for a class or branch. Create one to start billing students.</div>
+        <button class="btn btn-primary btn-lg mt-2" onclick="App.go('feeStructure',{sub:true,id:'new'})">${icon('plus')} Create structure</button></div>`;
+      return;
+    }
+    const active=structs.filter(s=>s.is_active); const inactive=structs.filter(s=>!s.is_active);
+    const render=list=>`<div class="card card-pad-0"><div class="list">${list.map(s=>`
+      <div class="row" onclick="App.go('feeStructure',{sub:true,id:'${s.public_id}'})">
+        <div class="avatar avatar-sq" style="background:${s.is_active?'var(--success-subtle)':'var(--surface-sunken)'};color:${s.is_active?'var(--success)':'var(--text-tertiary)'}">${icon('chart')}</div>
+        <div class="row-main">
+          <div class="row-title">${s.structure_name}</div>
+          <div class="row-sub">${s.head_lines.length} heads · Total ${fmt.money(parseFloat(s.total_amount))}</div>
+        </div>
+        <span class="row-chev">${icon('chevronR')}</span>
+      </div>`).join('')}</div></div>`;
+    el.innerHTML=`
+      ${active.length>0?`<div class="sec-head"><div class="sec-title">Active (${active.length})</div></div>${render(active)}<p class="t-caption text-center mt-2 mb-4">Tap a structure to view or deactivate</p>`:''}
+      ${inactive.length>0?`<div class="sec-head"><div class="sec-title">Inactive (${inactive.length})</div></div>${render(inactive)}<br>`:''}
+      <button class="btn btn-primary btn-full" onclick="App.go('feeStructure',{sub:true,id:'new'})">${icon('plus')} Create structure</button>
+    `;
+  },
+
+  /* FEE STRUCTURE DETAIL / CREATE  (mirrors FeeStructureCreate)
+     head_lines[]: fee_head_name, amount, gst_percentage */
+  FeeStructureDetail(el){
+    const isNew=this.ctx.id==='new';
+    this._backTo='feeStructures'; this.ctx.sub=true;
+    this.ctx.title=isNew?'Create structure':'Structure detail'; this.ctx.subtitle='';
+    document.querySelector('.appbar')?.remove(); document.getElementById('app').insertAdjacentHTML('afterbegin',this.AppBar());
+
+    if(!isNew){
+      // VIEW existing structure
+      const s=this.F.feeStructureById(this.ctx.id);
+      if(!s){ el.innerHTML=`<div class="state"><div class="state-title">Not found</div></div>`; return; }
+      el.innerHTML=`
+        <div class="card card-raised mb-4">
+          <div class="flex between items-center mb-3">
+            <div class="t-h2">${s.structure_name}</div>
+            <span class="chip ${s.is_active?'chip-success':'chip-neutral'}">${s.is_active?'Active':'Inactive'}</span>
+          </div>
+          <div class="row-sub mb-2">Session 2026-27 · Main Campus</div>
+          ${s.class_level_public_id?`<div class="row-sub">Class level: ${s.class_level_public_id}</div>`:'<div class="row-sub">Applies to all class levels</div>'}
+        </div>
+
+        <div class="sec-head"><div class="sec-title">Head lines</div><span class="t-caption">${s.head_lines.length} items</span></div>
+        <div class="card card-pad-0 mb-4"><div class="list">
+          ${s.head_lines.map(l=>`<div class="row" style="cursor:default">
+            <div class="avatar avatar-sq" style="background:var(--brand-subtle);color:var(--brand)">${icon('wallet')}</div>
+            <div class="row-main"><div class="row-title">${l.fee_head_name}</div>
+              ${parseFloat(l.gst_percentage)>0?`<div class="row-sub">GST ${l.gst_percentage}%</div>`:''}
+            </div>
+            <div class="t-data" style="font-weight:700">${fmt.money(parseFloat(l.line_total))}</div>
+          </div>`).join('')}
+          <div class="row" style="cursor:default;background:var(--surface-sunken)">
+            <div class="flex-1 row-title" style="font-weight:700">Total</div>
+            <div class="t-data" style="font-weight:800;color:var(--brand)">${fmt.money(parseFloat(s.total_amount))}</div>
+          </div>
+        </div></div>
+
+        <button class="btn ${s.is_active?'btn-danger-soft':'btn-primary'} btn-full"
+          onclick="App._toggleFeeStructure('${s.public_id}')">
+          ${s.is_active?icon('ban')+' Deactivate structure':icon('check')+' Activate structure'}
+        </button>
+      `;
+      return;
+    }
+
+    // CREATE new structure
+    if(!this._fsLines) this._fsLines=[]; // draft lines
+    const heads=this.F.activeFeeHeads();
+    if(heads.length===0){
+      el.innerHTML=`<div class="state"><div class="state-ill">${icon('wallet')}</div>
+        <div class="state-title">No fee heads yet</div>
+        <div class="state-msg">You need at least one fee head before creating a structure.</div>
+        <button class="btn btn-primary mt-2" onclick="App.go('feeHeads')">${icon('plus')} Add fee heads first</button></div>`;
+      return;
+    }
+    el.innerHTML=`
+      <div class="field"><label class="field-label">Structure name <span class="req">*</span></label>
+        <input class="input" id="fs-name" placeholder="e.g. Primary 2026-27, Class 6–8 Annual"></div>
+      <div class="field"><label class="field-label">Class level</label>
+        <select class="select" id="fs-class">
+          <option value="">All class levels (applies school-wide)</option>
+          ${(this.S.academic().classLevels||[]).map(c=>`<option value="${c.id}">${c.name}</option>`).join('')}
+        </select></div>
+
+      <div class="sec-head mt-2"><div class="sec-title">Fee lines</div>
+        <span class="t-caption" id="fs-total">${this._fsTotalStr()}</span></div>
+      <div id="fs-lines" class="card card-pad-0 mb-3"><div class="list">
+        ${this._fsLinesMarkup(heads)}
+      </div></div>
+      <button class="btn btn-secondary btn-full mb-4" onclick="App.addFeeLinePicker()">${icon('plus')} Add line</button>
+
+      <div id="fs-err"></div>
+      <button class="btn btn-primary btn-full btn-lg" onclick="App._saveFeeStructure()">
+        ${icon('check')} Create structure
+      </button>
+    `;
+  },
+  _fsLinesMarkup(heads){
+    if(!this._fsLines||!this._fsLines.length) return `<div class="row" style="cursor:default;color:var(--text-tertiary)"><div class="row-main"><div class="row-title" style="font-weight:400">No lines yet — tap "Add line"</div></div></div>`;
+    const headMap=Object.fromEntries((heads||this.F.activeFeeHeads()).map(h=>[h.head_name,h]));
+    return this._fsLines.map((l,i)=>`<div class="row" style="cursor:default">
+      <div class="avatar avatar-sq" style="background:var(--brand-subtle);color:var(--brand)">${icon('wallet')}</div>
+      <div class="row-main"><div class="row-title">${l.fee_head_name}</div>
+        ${parseFloat(l.gst_percentage)>0?`<div class="row-sub">GST ${l.gst_percentage}%</div>`:''}
+      </div>
+      <div class="flex items-center gap-2">
+        <span class="t-data" style="font-weight:700">${fmt.money(parseFloat(l.amount))}</span>
+        <button class="appbar-btn" style="width:32px;height:32px" onclick="App._removeFsLine(${i})">${icon('trash')}</button>
+      </div>
+    </div>`).join('');
+  },
+  _fsTotalStr(){
+    if(!this._fsLines||!this._fsLines.length) return 'No items';
+    const total=this._fsLines.reduce((s,l)=>s+parseFloat(l.amount||0)*(1+(parseFloat(l.gst_percentage||0)/100)),0);
+    return `Total ${fmt.money(Math.round(total))}`;
+  },
+  addFeeLinePicker(){
+    const heads=this.F.activeFeeHeads();
+    const used=new Set((this._fsLines||[]).map(l=>l.fee_head_name));
+    const avail=heads.filter(h=>!used.has(h.head_name));
+    if(!avail.length){ UI.toast('All active fee heads are already added'); return; }
+    const {close}=UI.sheet(`
+      <div class="sheet-title">Add fee line</div>
+      <div class="field"><label class="field-label">Fee head <span class="req">*</span></label>
+        <select class="select" id="fl-head">
+          <option value="">— Select —</option>
+          ${avail.map(h=>`<option value="${h.head_name}">${h.head_name}${h.is_refundable?' (refundable)':''}</option>`).join('')}
+        </select></div>
+      <div class="field"><label class="field-label">Amount (₹) <span class="req">*</span></label>
+        <input class="input" id="fl-amount" type="number" min="0" step="100" placeholder="e.g. 18000"></div>
+      <div class="field"><label class="field-label">GST %</label>
+        <input class="input" id="fl-gst" type="number" min="0" max="28" step="0.5" placeholder="0" value="0"></div>
+      <div id="fl-err"></div>
+      <button class="btn btn-primary btn-full btn-lg mt-3" onclick="App._addFsLine()">Add line</button>
+    `);
+    this._flClose=close;
+  },
+  _addFsLine(){
+    const head=document.getElementById('fl-head').value;
+    const amount=document.getElementById('fl-amount').value;
+    const gst=document.getElementById('fl-gst').value||'0';
+    const err=document.getElementById('fl-err');
+    if(!head||!amount){ err.innerHTML=`<div class="field-error mb-2">${icon('alert')} Fee head and amount are required.</div>`; return; }
+    if(parseFloat(amount)<=0){ err.innerHTML=`<div class="field-error mb-2">${icon('alert')} Amount must be greater than zero.</div>`; return; }
+    this._fsLines=this._fsLines||[];
+    this._fsLines.push({fee_head_name:head,amount:String(parseFloat(amount)),gst_percentage:String(parseFloat(gst)||0)});
+    this._flClose&&this._flClose();
+    // refresh lines and total
+    const heads=this.F.activeFeeHeads();
+    document.getElementById('fs-lines').innerHTML=`<div class="list">${this._fsLinesMarkup(heads)}</div>`;
+    const tot=document.getElementById('fs-total'); if(tot) tot.textContent=this._fsTotalStr();
+  },
+  _removeFsLine(idx){
+    this._fsLines.splice(idx,1);
+    const heads=this.F.activeFeeHeads();
+    document.getElementById('fs-lines').innerHTML=`<div class="list">${this._fsLinesMarkup(heads)}</div>`;
+    const tot=document.getElementById('fs-total'); if(tot) tot.textContent=this._fsTotalStr();
+  },
+  _saveFeeStructure(){
+    const name=document.getElementById('fs-name').value.trim();
+    const cls=document.getElementById('fs-class').value||null;
+    const err=document.getElementById('fs-err');
+    if(!name){ err.innerHTML=`<div class="field-error mb-2">${icon('alert')} Structure name is required.</div>`; return; }
+    if(!this._fsLines||!this._fsLines.length){ err.innerHTML=`<div class="field-error mb-2">${icon('alert')} Add at least one fee line.</div>`; return; }
+    const struct=this.F.addFeeStructure({structure_name:name,class_level_public_id:cls,head_lines:this._fsLines});
+    this._fsLines=[];
+    UI.toast(`"${struct.structure_name}" created — ${fmt.money(parseFloat(struct.total_amount))} total`);
+    this.go('feeStructure',{sub:true,id:struct.public_id});
+  },
+  _toggleFeeStructure(id){
+    const s=this.F.toggleFeeStructure(id);
+    this.FeeStructureDetail(document.getElementById('screen'));
+    UI.toast(s.is_active?`"${s.structure_name}" activated`:`"${s.structure_name}" deactivated`);
+  },
 
   /* ---- Settings ---- */
   Settings(el){
     this._backTo='more'; this.ctx.sub=true; this.ctx.title='Settings'; this.ctx.subtitle='Account & preferences';
     document.querySelector('.appbar')?.remove(); document.getElementById('app').insertAdjacentHTML('afterbegin',this.AppBar());
     const s=Auth.getSession(); const set=this.F.settings();
+    const org=this.F.orgProfile();
     el.innerHTML=`
+      <div class="sec-head"><div class="sec-title">Account</div></div>
       <div class="card card-pad-0 mb-4"><div class="list">
-        <div class="row" style="cursor:default"><div class="avatar avatar-sq" style="background:var(--info-subtle);color:var(--info)">${icon('mail')}</div><div class="row-main"><div class="row-title" style="font-weight:500">Email</div><div class="row-sub">${s.email}</div></div></div>
-        <div class="row" style="cursor:default"><div class="avatar avatar-sq" style="background:var(--brand-subtle);color:var(--brand)">${icon('shield')}</div><div class="row-main"><div class="row-title" style="font-weight:500">Organization code</div><div class="row-sub t-code">${s.orgCode}</div></div></div>
+        <div class="row" style="cursor:default">
+          <div class="avatar avatar-sq" style="background:var(--info-subtle);color:var(--info)">${icon('mail')}</div>
+          <div class="row-main"><div class="row-title" style="font-weight:500">Email</div><div class="row-sub">${s.email}</div></div>
+        </div>
+        <div class="row" style="cursor:default">
+          <div class="avatar avatar-sq" style="background:var(--brand-subtle);color:var(--brand)">${icon('shield')}</div>
+          <div class="row-main"><div class="row-title" style="font-weight:500">Organization code</div><div class="row-sub t-code">${s.orgCode}</div></div>
+        </div>
       </div></div>
+
+      <div class="sec-head"><div class="sec-title">School configuration</div></div>
       <div class="card card-pad-0 mb-4"><div class="list">
-        <div class="row" onclick="App.openThemeSheet()"><div class="avatar avatar-sq" style="background:var(--brand-subtle);color:var(--brand)">${icon('palette')}</div><div class="row-main"><div class="row-title" style="font-weight:500">Theme</div><div class="row-sub">${this.themeName(set.theme)} · ${set.mode}</div></div><span class="row-chev">${icon('chevronR')}</span></div>
+        <div class="row" onclick="App.go('orgProfile')">
+          <div class="avatar avatar-sq" style="background:var(--brand-subtle);color:var(--brand)">${icon('building2')}</div>
+          <div class="row-main"><div class="row-title" style="font-weight:500">School profile</div>
+            <div class="row-sub">${org.display_name||'—'} · ${org.primary_contact_email||'—'}</div></div>
+          <span class="row-chev">${icon('chevronR')}</span></div>
+        <div class="row" onclick="App.go('orgSettings')">
+          <div class="avatar avatar-sq" style="background:var(--info-subtle);color:var(--info)">${icon('settings')}</div>
+          <div class="row-main"><div class="row-title" style="font-weight:500">Organization settings</div>
+            <div class="row-sub">Attendance rules, grading, academic year</div></div>
+          <span class="row-chev">${icon('chevronR')}</span></div>
+        <div class="row" onclick="App.go('notifications')">
+          <div class="avatar avatar-sq" style="background:var(--success-subtle);color:var(--success)">${icon('bell')}</div>
+          <div class="row-main"><div class="row-title" style="font-weight:500">Notifications</div>
+            <div class="row-sub">Templates & channel preferences</div></div>
+          <span class="row-chev">${icon('chevronR')}</span></div>
       </div></div>
-      <button class="btn btn-secondary btn-full" onclick="App.confirmLogout()">${icon('logout')} Sign out</button>`;
+
+      <div class="sec-head"><div class="sec-title">Appearance</div></div>
+      <div class="card card-pad-0 mb-4"><div class="list">
+        <div class="row" onclick="App.openThemeSheet()">
+          <div class="avatar avatar-sq" style="background:var(--brand-subtle);color:var(--brand)">${icon('palette')}</div>
+          <div class="row-main"><div class="row-title" style="font-weight:500">Theme</div><div class="row-sub">${this.themeName(set.theme)} · ${set.mode}</div></div>
+          <span class="row-chev">${icon('chevronR')}</span></div>
+      </div></div>
+
+      <button class="btn btn-secondary btn-full" onclick="App.confirmLogout()">${icon('logout')} Sign out</button>
+    `;
+  },
+
+  /* ---- SCHOOL PROFILE (PATCH /organization → OrganizationUpdate) ---- */
+  OrgProfile(el){
+    this._backTo='settings'; this.ctx.sub=true; this.ctx.title='School profile'; this.ctx.subtitle='';
+    document.querySelector('.appbar')?.remove(); document.getElementById('app').insertAdjacentHTML('afterbegin',this.AppBar());
+    const org=this.F.orgProfile();
+    el.innerHTML=`
+      <div class="field"><label class="field-label">Display name</label>
+        <input class="input" id="op-display" value="${org.display_name||''}" placeholder="School display name"></div>
+      <div class="field"><label class="field-label">Legal / registered name</label>
+        <input class="input" id="op-legal" value="${org.legal_name||''}" placeholder="Registered legal name for documents"></div>
+      <div class="field"><label class="field-label">Institution type</label>
+        <select class="select" id="op-type">
+          ${['K12','Higher Education','Vocational','Coaching Institute','Other'].map(t=>`<option value="${t.replace(/ /g,'_')}" ${(org.institution_type_code||'K12')===t.replace(/ /g,'_')?'selected':''}>${t}</option>`).join('')}
+        </select></div>
+      <div class="field"><label class="field-label">Primary contact email</label>
+        <input class="input" id="op-email" type="email" value="${org.primary_contact_email||''}" placeholder="info@school.edu"></div>
+      <div class="field"><label class="field-label">Primary contact phone</label>
+        <input class="input" id="op-phone" type="tel" value="${org.primary_contact_phone||''}" placeholder="+91 98450 11223"></div>
+      <div class="field"><label class="field-label">Timezone</label>
+        <select class="select" id="op-tz">
+          ${['Asia/Kolkata','Asia/Dubai','Asia/Singapore','UTC'].map(tz=>`<option ${(org.timezone||'Asia/Kolkata')===tz?'selected':''}>${tz}</option>`).join('')}
+        </select></div>
+      <div id="op-err"></div>
+      <button class="btn btn-primary btn-full btn-lg" onclick="App._saveOrgProfile()">${icon('check')} Save profile</button>
+    `;
+  },
+  _saveOrgProfile(){
+    const email=document.getElementById('op-email').value.trim();
+    const err=document.getElementById('op-err');
+    if(email && !/^\S+@\S+\.\S+$/.test(email)){
+      err.innerHTML=`<div class="field-error mb-2">${icon('alert')} Enter a valid email address.</div>`; return;
+    }
+    this.F.updateOrgProfile({
+      display_name:document.getElementById('op-display').value.trim()||undefined,
+      legal_name:document.getElementById('op-legal').value.trim()||undefined,
+      institution_type_code:document.getElementById('op-type').value||undefined,
+      primary_contact_email:email||undefined,
+      primary_contact_phone:document.getElementById('op-phone').value.trim()||undefined,
+      timezone:document.getElementById('op-tz').value||undefined,
+    });
+    UI.toast('School profile saved');
+    this.go('settings');
+  },
+
+  /* ---- ORGANIZATION SETTINGS (PUT /settings → OrganizationSettingsReplace{settings:object}) ---- */
+  OrgSettings(el){
+    this._backTo='settings'; this.ctx.sub=true; this.ctx.title='Organization settings'; this.ctx.subtitle='';
+    document.querySelector('.appbar')?.remove(); document.getElementById('app').insertAdjacentHTML('afterbegin',this.AppBar());
+    const s=this.F.orgSettings();
+    el.innerHTML=`
+      <p class="text-secondary mb-4">These settings apply school-wide and affect how the system calculates attendance, fees, and grades.</p>
+
+      <div class="sec-head"><div class="sec-title">Academic year</div></div>
+      <div class="card mb-4"><div class="dl">
+        <div class="dl-row"><span class="dl-key">Start month</span>
+          <select class="select" id="os-month" style="max-width:140px">
+            ${['January','February','March','April','May','June','July','August','September','October','November','December'].map((m,i)=>`<option value="${i+1}" ${(s.academic_year_start_month||6)===(i+1)?'selected':''}>${m}</option>`).join('')}
+          </select></div>
+        <div class="dl-row"><span class="dl-key">Default locale</span>
+          <select class="select" id="os-locale" style="max-width:140px">
+            ${['en','hi','ta','te','kn','ml'].map(l=>`<option ${(s.default_locale||'en')===l?'selected':''}>${l}</option>`).join('')}
+          </select></div>
+      </div></div>
+
+      <div class="sec-head"><div class="sec-title">Attendance</div></div>
+      <div class="card mb-4">
+        <div class="field" style="margin:0"><label class="field-label">Minimum attendance threshold (%)</label>
+          <input class="input" id="os-att" type="number" min="0" max="100" value="${s.attendance_threshold_percent||75}" placeholder="75"></div>
+        <div class="field-hint">Students below this % will be flagged as at-risk in reports.</div>
+      </div>
+
+      <div class="sec-head"><div class="sec-title">Fees</div></div>
+      <div class="card mb-4"><div class="dl">
+        <div class="dl-row"><span class="dl-key">Late fee grace period (days)</span>
+          <input class="input" id="os-grace" type="number" min="0" max="30" value="${s.late_fee_grace_days||7}" style="max-width:80px;text-align:center;padding:6px"></div>
+        <div class="dl-row"><span class="dl-key">Allow partial payments</span>
+          <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+            <input type="checkbox" id="os-partial" ${s.allow_partial_payments!==false?'checked':''} style="width:18px;height:18px;accent-color:var(--brand)">
+            <span class="t-caption">${s.allow_partial_payments!==false?'Enabled':'Disabled'}</span>
+          </label></div>
+      </div></div>
+
+      <div class="sec-head"><div class="sec-title">School timings</div></div>
+      <div class="card mb-4"><div class="grid-2">
+        <div class="field" style="margin:0"><label class="field-label">Start time</label>
+          <input class="input" id="os-start" type="time" value="${s.school_timings_start||'08:00'}"></div>
+        <div class="field" style="margin:0"><label class="field-label">End time</label>
+          <input class="input" id="os-end" type="time" value="${s.school_timings_end||'16:00'}"></div>
+      </div></div>
+
+      <div class="sec-head"><div class="sec-title">Grading</div></div>
+      <div class="card mb-4">
+        <div class="segmented" id="os-grade-seg">
+          ${['percentage','gpa','custom'].map(g=>`<button class="${(s.grading_scale||'percentage')===g?'active':''}" onclick="App._setGrading('${g}')">${g[0].toUpperCase()+g.slice(1)}</button>`).join('')}
+        </div>
+        <div class="field-hint mt-2" id="os-grade-hint">${this._gradingHint(s.grading_scale||'percentage')}</div>
+      </div>
+
+      <button class="btn btn-primary btn-full btn-lg" onclick="App._saveOrgSettings()">${icon('check')} Save settings</button>
+    `;
+    this._gradingScale=s.grading_scale||'percentage';
+  },
+  _gradingHint(scale){ return scale==='percentage'?'Marks shown as percentages (0–100%)':scale==='gpa'?'Marks shown as GPA (0.0–4.0 or 10.0)':'Define your own grading system in the academic setup.'; },
+  _setGrading(scale){
+    this._gradingScale=scale;
+    document.querySelectorAll('#os-grade-seg button').forEach(b=>b.classList.toggle('active',b.textContent.toLowerCase()===scale));
+    const hint=document.getElementById('os-grade-hint'); if(hint) hint.textContent=this._gradingHint(scale);
+  },
+  _saveOrgSettings(){
+    this.F.updateOrgSettings({
+      academic_year_start_month:parseInt(document.getElementById('os-month').value)||6,
+      default_locale:document.getElementById('os-locale').value||'en',
+      attendance_threshold_percent:parseInt(document.getElementById('os-att').value)||75,
+      late_fee_grace_days:parseInt(document.getElementById('os-grace').value)||7,
+      allow_partial_payments:document.getElementById('os-partial').checked,
+      school_timings_start:document.getElementById('os-start').value||'08:00',
+      school_timings_end:document.getElementById('os-end').value||'16:00',
+      grading_scale:this._gradingScale||'percentage',
+    });
+    UI.toast('Settings saved');
+    this.go('settings');
+  },
+
+  /* ---- NOTIFICATIONS (GET /notifications/templates + PUT /notifications/preferences) ---- */
+  Notifications(el){
+    this._backTo='settings'; this.ctx.sub=true; this.ctx.title='Notifications'; this.ctx.subtitle='Templates & preferences';
+    document.querySelector('.appbar')?.remove(); document.getElementById('app').insertAdjacentHTML('afterbegin',this.AppBar());
+    this._notifTab=this._notifTab||'preferences';
+    el.innerHTML=`
+      <div class="tabs mb-4">
+        <button class="${this._notifTab==='preferences'?'active':''}" onclick="App._notifTab='preferences';App.Notifications(document.getElementById('screen'))">Preferences</button>
+        <button class="${this._notifTab==='templates'?'active':''}" onclick="App._notifTab='templates';App.Notifications(document.getElementById('screen'))">Templates</button>
+      </div>
+      <div id="notif-body">${this._notifTab==='preferences'?this._notifPrefsMarkup():this._notifTemplatesMarkup()}</div>
+    `;
+  },
+  _notifPrefsMarkup(){
+    /* Renders a per-event × per-channel toggle grid.
+       Each toggle calls PUT /notifications/preferences {event_category, channel, is_enabled}  */
+    const prefs=this.F.notifPrefs();
+    const byEvent={};
+    prefs.forEach(p=>{ (byEvent[p.event_category]=byEvent[p.event_category]||[]).push(p); });
+    const CHANNELS=['email','sms','whatsapp','push'];
+    const eventLabels={'FEE_REMINDER':'Fee reminder','ATTENDANCE_ALERT':'Attendance alert',
+      'LEAVE_DECISION':'Leave decision','EXAM_SCHEDULE':'Exam schedule','PAYMENT_RECEIPT':'Payment receipt'};
+    return `
+      <p class="t-caption mb-4">Control which channels receive each type of notification. A toggle ON means the platform will send that notification via that channel.</p>
+      <div class="card card-pad-0 mb-4">
+        <!-- header row -->
+        <div class="row" style="cursor:default;background:var(--surface-sunken)">
+          <div class="row-main"></div>
+          ${CHANNELS.map(c=>`<div style="width:44px;text-align:center;font-size:11px;font-weight:600;color:var(--text-secondary)">${c[0].toUpperCase()+c.slice(1,3)}</div>`).join('')}
+        </div>
+        ${Object.keys(byEvent).map(ev=>{
+          const label=eventLabels[ev]||ev;
+          return `<div class="row" style="cursor:default">
+            <div class="row-main"><div class="row-title" style="font-weight:500;font-size:14px">${label}</div></div>
+            ${CHANNELS.map(ch=>{
+              const pref=prefs.find(p=>p.event_category===ev&&p.channel===ch);
+              const on=pref?pref.is_enabled:false;
+              return `<div style="width:44px;display:flex;justify-content:center">
+                <button onclick="App._togglePref('${ev}','${ch}')"
+                  style="width:28px;height:16px;border-radius:99px;border:none;cursor:pointer;transition:all .2s;
+                  background:${on?'var(--brand)':'var(--border-strong)'}">
+                  <span style="display:block;width:12px;height:12px;border-radius:50%;background:#fff;transition:all .2s;
+                    transform:translateX(${on?'14':'2'}px)"></span>
+                </button>
+              </div>`;
+            }).join('')}
+          </div>`;
+        }).join('')}
+      </div>
+      <div class="dashed-card">${icon('sparkle')} <span class="t-caption">Enabling a channel here requires that channel to be configured in your platform plan. SMS, WhatsApp, and Push need Pro or above.</span></div>
+    `;
+  },
+  _togglePref(event_category,channel){
+    const prefs=this.F.notifPrefs();
+    const pref=prefs.find(p=>p.event_category===event_category&&p.channel===channel);
+    const newVal=pref?!pref.is_enabled:true;
+    this.F.updatePref(event_category,channel,newVal);
+    document.getElementById('notif-body').innerHTML=this._notifPrefsMarkup();
+    UI.toast(`${event_category} via ${channel} ${newVal?'enabled':'disabled'}`);
+  },
+  _notifTemplatesMarkup(){
+    /* Shows templates grouped by event, per channel.
+       Each toggle calls PATCH /notifications/templates/{code}/{channel}  */
+    const byEvent=this.F.templatesByEvent();
+    const eventLabels={'FEE_REMINDER':'Fee reminder','ATTENDANCE_ALERT':'Attendance alert',
+      'LEAVE_DECISION':'Leave decision','EXAM_SCHEDULE':'Exam schedule','PAYMENT_RECEIPT':'Payment receipt'};
+    const channelIcon={email:'mail',sms:'phone',whatsapp:'phone',push:'bell',internal:'shield'};
+    return `
+      <p class="t-caption mb-4">Templates define the content sent for each event and channel. Toggle a template off to suppress that channel for the event without affecting preferences.</p>
+      ${Object.keys(byEvent).map(ev=>{
+        const label=eventLabels[ev]||ev;
+        const tmpls=byEvent[ev];
+        return `<div class="sec-head"><div class="sec-title">${label}</div></div>
+          <div class="card card-pad-0 mb-4"><div class="list">
+          ${tmpls.map(t=>`<div class="row" style="cursor:default">
+            <div class="avatar avatar-sq" style="background:${t.is_active?'var(--brand-subtle)':'var(--surface-sunken)'};color:${t.is_active?'var(--brand)':'var(--text-tertiary)'}">${icon(channelIcon[t.channel]||'bell')}</div>
+            <div class="row-main">
+              <div class="row-title" style="font-weight:500">${t.channel[0].toUpperCase()+t.channel.slice(1)}</div>
+              <div class="row-sub" style="white-space:normal;line-height:1.3">${(t.body_template||'').slice(0,60)}…</div>
+            </div>
+            <button onclick="App._toggleTemplate('${t.template_code}','${t.channel}')"
+              style="flex-shrink:0;width:44px;height:24px;border-radius:99px;border:none;cursor:pointer;
+              background:${t.is_active?'var(--brand)':'var(--border-strong)'}">
+              <span style="display:block;width:18px;height:18px;border-radius:50%;background:#fff;margin:3px;transition:all .2s;
+                transform:translateX(${t.is_active?'18':'0'}px)"></span>
+            </button>
+          </div>`).join('')}
+          </div></div>`;
+      }).join('')}
+    `;
+  },
+  _toggleTemplate(template_code,channel){
+    const t=this.F.notifTemplates().find(x=>x.template_code===template_code&&x.channel===channel);
+    if(!t) return;
+    this.F.updateTemplate(template_code,channel,{is_active:!t.is_active});
+    document.getElementById('notif-body').innerHTML=this._notifTemplatesMarkup();
+    UI.toast(`${template_code} via ${channel} ${!t.is_active?'enabled':'disabled'}`);
   },
 
   /* ---- theme sheet (shared pattern) ---- */
