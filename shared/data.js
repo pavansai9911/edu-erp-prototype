@@ -98,7 +98,24 @@ const DB = {
       orgId:org.id, orgCode, name:founderName, email:founderEmail,
       password:founderPassword, role:'Founder', status:'active', avatar:this._initials(founderName),
     });
+    // The Founder app is a separate page/module (shared/founder-data.js) that
+    // ERP Admin never loads (deliberate operator/tenant boundary — see README).
+    // Its own founder-login list lives at a different sessionStorage prefix, so
+    // a founder created here must be written there directly (same tab/session,
+    // same origin — sessionStorage is shared across pages) or the new founder
+    // would have no way to ever sign in to the Founder app.
+    this._provisionFounderLogin({id:founder.id,name:founderName,email:founderEmail,password:founderPassword,avatar:this._initials(founderName),orgCode});
     return {org,founder};
+  },
+
+  /* writes into FounderDB's own sessionStorage founders list (PFX 'eduerp_fdr_',
+     key 'founders') without loading founder-data.js — see onboardSchool() above */
+  _provisionFounderLogin(f){
+    const FDR_PFX='eduerp_fdr_', KEY='founders';
+    let list=[];
+    try{ const raw=sessionStorage.getItem(FDR_PFX+KEY); list=raw?JSON.parse(raw):[]; }catch{ list=[]; }
+    if(!list.some(x=>x.email.toLowerCase()===f.email.toLowerCase())) list.push(f);
+    sessionStorage.setItem(FDR_PFX+KEY,JSON.stringify(list));
   },
 
   changePlan(orgId,newPlan,reason){

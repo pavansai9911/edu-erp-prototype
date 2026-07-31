@@ -28,7 +28,7 @@ const Auth = {
    * Login. `app` scopes which credential source is checked, mirroring the
    * real multi-tenant login (LoginRequest.identifier + optional org_code):
    *   'admin'   -> platform admins only (DB.COLS.ADMINS)
-   *   'founder' -> the seeded founder identity (FounderDB.founderCredentials())
+   *   'founder' -> any founder login, seeded or onboarded (FounderDB.founders())
    *   'staff'   -> any seeded staff member (StaffDB.staffUsers())
    */
   login(identifier,password,app){
@@ -42,8 +42,8 @@ const Auth = {
       account=DB.getAll(DB.COLS.ADMINS).find(u=>u.email.toLowerCase()===em && u.status==='active');
       if(account && account.password===password) sessionData={userId:account.id,name:account.name,email:account.email,role:account.role,app:'admin',avatar:account.avatar};
     }else if(app==='founder'){
-      const fc=typeof FounderDB!=='undefined'?FounderDB.founderCredentials():null;
-      if(fc && fc.email.toLowerCase()===em){ account=fc; if(fc.password===password) sessionData={userId:'FDR-DEMO',name:fc.name,email:fc.email,role:'Founder',app:'founder',orgCode:fc.orgCode,avatar:fc.avatar}; }
+      const fc=typeof FounderDB!=='undefined'?FounderDB.founderByEmail(em):null;
+      if(fc){ account=fc; if(fc.password===password) sessionData={userId:fc.id||'FDR-DEMO',name:fc.name,email:fc.email,role:'Founder',app:'founder',orgCode:fc.orgCode,avatar:fc.avatar}; }
     }else if(app==='staff'){
       const su=typeof StaffDB!=='undefined'?StaffDB.staffUsers().find(u=>u.email.toLowerCase()===em):null;
       if(su){ account=su; if(su.password===password) sessionData={userId:su.id,staffId:su.id,name:su.name,email:su.email,role:'Staff',app:'staff',avatar:su.avatar}; }
@@ -93,7 +93,7 @@ const Auth = {
     if(!rec || !rec.verified || rec.resetTicket!==resetTicket) return {success:false,message:'This reset link is invalid or has expired. Start again.'};
     let updated=false;
     if(app==='admin'){ const a=DB.getAll(DB.COLS.ADMINS).find(u=>u.email.toLowerCase()===em); if(a){ DB.update(DB.COLS.ADMINS,a.id,{password:newPassword}); updated=true; } }
-    else if(app==='founder' && typeof FounderDB!=='undefined'){ FounderDB.setFounderPassword(newPassword); updated=true; }
+    else if(app==='founder' && typeof FounderDB!=='undefined'){ if(FounderDB.founderByEmail(em)){ FounderDB.setFounderPassword(em,newPassword); updated=true; } }
     else if(app==='staff' && typeof StaffDB!=='undefined'){ const su=StaffDB.staffUsers().find(u=>u.email.toLowerCase()===em); if(su){ StaffDB.updateStaff(su.id,{password:newPassword,passwordSet:true}); updated=true; } }
     delete flow[key]; sessionStorage.setItem(this.RESET_KEY,JSON.stringify(flow));
     return updated?{success:true}:{success:false,message:'We couldn\u2019t find that account.'};
