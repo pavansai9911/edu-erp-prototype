@@ -103,6 +103,11 @@ const Auth = {
   _start(data){
     const session={...data,loginTime:new Date().toISOString()};
     sessionStorage.setItem(this.SESSION_KEY,JSON.stringify(session));
+    // FounderDB.init() self-seeds once at page load, before anyone has logged
+    // in — so a login for a DIFFERENT org than whichever was active at load
+    // time needs to re-run it now that the session (and therefore the active
+    // org) has just changed, or that org's tenant data would never get seeded.
+    if(data.app==='founder' && typeof FounderDB!=='undefined') FounderDB.init();
     return {success:true,user:session};
   },
 
