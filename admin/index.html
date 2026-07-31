@@ -43,6 +43,19 @@ const App = {
     document.documentElement.dataset.theme=theme;
     const m = mode==='system' ? (this.systemDark?'dark':'light') : mode;
     document.documentElement.dataset.mode=m;
+    // EDU-003: custom color sets the same 5 vars each preset theme defines in
+    // tokens.css, as inline styles (higher specificity than [data-theme] rules).
+    // Presets clear any leftover inline overrides so the stylesheet takes back over.
+    const root=document.documentElement.style;
+    const VARS=['--brand','--brand-hover','--brand-subtle','--header-bg','--accent'];
+    if(theme==='custom'){
+      const d=ThemeColor.derive(DB.getSettings().customColor||'#7C5CFF')[m==='dark'?'dark':'light'];
+      root.setProperty('--brand',d.brand); root.setProperty('--brand-hover',d.brandHover);
+      root.setProperty('--brand-subtle',d.brandSubtle); root.setProperty('--header-bg',d.headerBg);
+      root.setProperty('--accent',d.accent);
+    } else {
+      VARS.forEach(v=>root.removeProperty(v));
+    }
   },
 
   /* ========================================================================
@@ -767,7 +780,7 @@ const App = {
     `;
   },
   themes:[['violet','Violet','#7C5CFF','Default'],['indigo','Indigo','#4F46E5',''],['emerald','Emerald','#059669',''],['slate','Slate','#475569',''],['amber','Warm Amber','#D97706',''],['contrast','High Contrast','#1D4ED8','Accessibility']],
-  themeName(k){ return (this.themes.find(t=>t[0]===k)||[])[1]||k; },
+  themeName(k){ return k==='custom'?'Custom color':((this.themes.find(t=>t[0]===k)||[])[1]||k); },
   openThemeSheet(){
     const st=DB.getSettings();
     const {el,close}=UI.sheet(`
@@ -776,30 +789,47 @@ const App = {
         ${[['light','Light'],['dark','Dark'],['system','Auto']].map(([k,l])=>`<button class="${st.mode===k?'active':''}" onclick="App.setMode('${k}')">${l}</button>`).join('')}
       </div>
       <div class="field-label mb-2">Theme</div>
-      <div id="themeList">${this.themes.map(([k,name,col,tag])=>`
-        <div class="row" style="border:none;padding:10px 4px" onclick="App.setTheme('${k}')">
-          <div style="width:36px;height:36px;border-radius:50%;background:${col};border:2px solid var(--border-subtle);flex-shrink:0"></div>
-          <div class="row-main"><div class="row-title" style="font-weight:600">${name}</div>${tag?`<div class="row-sub">${tag}</div>`:''}</div>
-          ${st.theme===k?`<span style="color:var(--brand)">${icon('check')}</span>`:''}
-        </div>`).join('')}</div>
+      <div id="themeList"></div>
       <button class="btn btn-secondary btn-full mt-4" onclick="App._themeClose()">Done</button>
     `);
-    this._themeSheetEl=el; this._themeClose=close;
+    this._themeSheetEl=el; this._themeClose=close; this._refreshThemeSheet();
   },
   setTheme(k){ DB.updateSettings({theme:k}); this.applyTheme(k,DB.getSettings().mode); this._refreshThemeSheet(); },
   setMode(k){ DB.updateSettings({mode:k}); this.applyTheme(DB.getSettings().theme,k); this._refreshThemeSheet(); },
-  _refreshThemeSheet(){
-    const st=DB.getSettings();
-    // update mode segment
-    this._themeSheetEl.querySelectorAll('#modeSeg button').forEach(b=>b.classList.toggle('active',b.textContent.toLowerCase().startsWith(st.mode==='system'?'auto':st.mode)));
-    // update theme checks
-    const list=this._themeSheetEl.querySelector('#themeList');
-    list.innerHTML=this.themes.map(([k,name,col,tag])=>`
+  /* EDU-003: validates + saves an arbitrary hex as the active theme */
+  setCustomColor(hex){
+    if(!ThemeColor.isValidHex(hex)){ UI.toast('Enter a valid hex color, e.g. #7C5CFF','error'); return; }
+    const norm=ThemeColor.normalizeHex(hex);
+    DB.updateSettings({theme:'custom',customColor:norm});
+    this.applyTheme('custom',DB.getSettings().mode);
+    this._refreshThemeSheet();
+  },
+  applyCustomHex(){ this.setCustomColor(document.getElementById('custom-hex-input').value); },
+  _themeListHtml(st){
+    const presetRows=this.themes.map(([k,name,col,tag])=>`
       <div class="row" style="border:none;padding:10px 4px" onclick="App.setTheme('${k}')">
         <div style="width:36px;height:36px;border-radius:50%;background:${col};border:2px solid var(--border-subtle);flex-shrink:0"></div>
         <div class="row-main"><div class="row-title" style="font-weight:600">${name}</div>${tag?`<div class="row-sub">${tag}</div>`:''}</div>
         ${st.theme===k?`<span style="color:var(--brand)">${icon('check')}</span>`:''}
       </div>`).join('');
+    const hex=st.customColor||'#7C5CFF';
+    return presetRows+`
+      <div class="field-label mt-4 mb-2">Custom color</div>
+      <div class="flex gap-3 items-center mb-3">
+        <input type="color" id="custom-color-input" value="${hex}" style="width:48px;height:44px;border:none;border-radius:var(--r-sm);background:none;padding:0;cursor:pointer" onchange="App.setCustomColor(this.value)" aria-label="Pick a custom color">
+        <input class="input t-code" id="custom-hex-input" value="${hex.toUpperCase()}" placeholder="#7C5CFF" maxlength="7" style="flex:1;text-transform:uppercase" oninput="this.value=this.value.toUpperCase()">
+        <button class="btn btn-primary btn-sm" onclick="App.applyCustomHex()">Apply</button>
+      </div>
+      <div class="flex gap-2" style="flex-wrap:wrap">
+        ${THEME_PALETTE.map(c=>`<button onclick="App.setCustomColor('${c}')" aria-label="Use ${c}" style="width:28px;height:28px;border-radius:50%;background:${c};border:2px solid ${st.theme==='custom'&&(st.customColor||'').toUpperCase()===c.toUpperCase()?'var(--brand)':'var(--border-subtle)'};cursor:pointer"></button>`).join('')}
+      </div>`;
+  },
+  _refreshThemeSheet(){
+    const st=DB.getSettings();
+    // update mode segment
+    this._themeSheetEl.querySelectorAll('#modeSeg button').forEach(b=>b.classList.toggle('active',b.textContent.toLowerCase().startsWith(st.mode==='system'?'auto':st.mode)));
+    // update theme checks + custom color section
+    this._themeSheetEl.querySelector('#themeList').innerHTML=this._themeListHtml(st);
   },
   confirmLogout(){ UI.confirm({title:'Sign out?',message:'You will need to sign in again to access the console.',confirmText:'Sign out',danger:true}).then(ok=>{ if(ok)this.logout(); }); },
 

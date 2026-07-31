@@ -58,7 +58,22 @@ const App = {
     UI.confirm({title:'Sign out?',message:'You will need to sign in again.',confirmText:'Sign out',danger:true})
       .then(ok=>{ if(ok){ Auth.logout(); this.renderLogin(); } });
   },
-  applyTheme(theme,mode){ document.documentElement.dataset.theme=theme; document.documentElement.dataset.mode= mode==='system'?(this.systemDark?'dark':'light'):mode; },
+  applyTheme(theme,mode){
+    document.documentElement.dataset.theme=theme;
+    const m=mode==='system'?(this.systemDark?'dark':'light'):mode;
+    document.documentElement.dataset.mode=m;
+    // EDU-003: custom color — see admin/index.html's applyTheme for the full rationale.
+    const root=document.documentElement.style;
+    const VARS=['--brand','--brand-hover','--brand-subtle','--header-bg','--accent'];
+    if(theme==='custom'){
+      const d=ThemeColor.derive(this.F.settings().customColor||'#7C5CFF')[m==='dark'?'dark':'light'];
+      root.setProperty('--brand',d.brand); root.setProperty('--brand-hover',d.brandHover);
+      root.setProperty('--brand-subtle',d.brandSubtle); root.setProperty('--header-bg',d.headerBg);
+      root.setProperty('--accent',d.accent);
+    } else {
+      VARS.forEach(v=>root.removeProperty(v));
+    }
+  },
 
   /* ---------- shell ---------- */
   render(){ document.getElementById('app').innerHTML=this.Shell(); this.mountScreen(); },
@@ -2022,7 +2037,7 @@ const App = {
 
   /* ---- theme sheet (shared pattern) ---- */
   themes:[['violet','Violet','#7C5CFF','Default'],['indigo','Indigo','#4F46E5',''],['emerald','Emerald','#059669',''],['slate','Slate','#475569',''],['amber','Warm Amber','#D97706',''],['contrast','High Contrast','#1D4ED8','Accessibility']],
-  themeName(k){ return (this.themes.find(t=>t[0]===k)||[])[1]||k; },
+  themeName(k){ return k==='custom'?'Custom color':((this.themes.find(t=>t[0]===k)||[])[1]||k); },
   openThemeSheet(){
     const st=this.F.settings();
     const {el,close}=UI.sheet(`<div class="sheet-title">Appearance</div>
@@ -2033,14 +2048,34 @@ const App = {
   },
   _renderThemeList(){
     const st=this.F.settings();
-    this._themeSheetEl.querySelector('#themeList').innerHTML=this.themes.map(([k,name,col,tag])=>`
+    const presetRows=this.themes.map(([k,name,col,tag])=>`
       <div class="row" style="border:none;padding:10px 4px" onclick="App.setTheme('${k}')">
         <div style="width:36px;height:36px;border-radius:50%;background:${col};border:2px solid var(--border-subtle);flex-shrink:0"></div>
         <div class="row-main"><div class="row-title" style="font-weight:600">${name}</div>${tag?`<div class="row-sub">${tag}</div>`:''}</div>
         ${st.theme===k?`<span style="color:var(--brand)">${icon('check')}</span>`:''}</div>`).join('');
+    const hex=st.customColor||'#7C5CFF';
+    this._themeSheetEl.querySelector('#themeList').innerHTML=presetRows+`
+      <div class="field-label mt-4 mb-2">Custom color</div>
+      <div class="flex gap-3 items-center mb-3">
+        <input type="color" id="custom-color-input" value="${hex}" style="width:48px;height:44px;border:none;border-radius:var(--r-sm);background:none;padding:0;cursor:pointer" onchange="App.setCustomColor(this.value)" aria-label="Pick a custom color">
+        <input class="input t-code" id="custom-hex-input" value="${hex.toUpperCase()}" placeholder="#7C5CFF" maxlength="7" style="flex:1;text-transform:uppercase" oninput="this.value=this.value.toUpperCase()">
+        <button class="btn btn-primary btn-sm" onclick="App.applyCustomHex()">Apply</button>
+      </div>
+      <div class="flex gap-2" style="flex-wrap:wrap">
+        ${THEME_PALETTE.map(c=>`<button onclick="App.setCustomColor('${c}')" aria-label="Use ${c}" style="width:28px;height:28px;border-radius:50%;background:${c};border:2px solid ${st.theme==='custom'&&(st.customColor||'').toUpperCase()===c.toUpperCase()?'var(--brand)':'var(--border-subtle)'};cursor:pointer"></button>`).join('')}
+      </div>`;
   },
   setTheme(k){ this.F.updateSettings({theme:k}); this.applyTheme(k,this.F.settings().mode); this._renderThemeList(); },
   setMode(k){ this.F.updateSettings({mode:k}); this.applyTheme(this.F.settings().theme,k); this._themeSheetEl.querySelectorAll('#modeSeg button').forEach(b=>b.classList.toggle('active',b.textContent.toLowerCase().startsWith(k==='system'?'auto':k))); },
+  /* EDU-003: validates + saves an arbitrary hex as the active theme */
+  setCustomColor(hex){
+    if(!ThemeColor.isValidHex(hex)){ UI.toast('Enter a valid hex color, e.g. #7C5CFF','error'); return; }
+    const norm=ThemeColor.normalizeHex(hex);
+    this.F.updateSettings({theme:'custom',customColor:norm});
+    this.applyTheme('custom',this.F.settings().mode);
+    this._renderThemeList();
+  },
+  applyCustomHex(){ this.setCustomColor(document.getElementById('custom-hex-input').value); },
 
   /* ---- misc ---- */
   notImplemented(w){ UI.toast((w||'This')+' — demonstrated in a later stage','error'); },
