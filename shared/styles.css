@@ -25,6 +25,13 @@ svg{width:20px;height:20px;flex-shrink:0;}
   body{background:#0B0A14;padding:0;}
   .viewport{max-height:920px;height:calc(100% - 32px);margin:16px auto;border-radius:28px;box-shadow:var(--shadow-3);}
 }
+/* #app is the SPA mount point (App.render() writes Shell() into it) and must
+   pass the flex column through from .viewport to .appbar/.content/.tabbar —
+   without this, #app is a plain block box that grows to its content's full
+   height, so .content's flex:1/overflow-y:auto never engages and anything
+   past one screen's height gets clipped by .viewport's overflow:hidden with
+   no way to scroll to it. */
+#app{flex:1;min-height:0;display:flex;flex-direction:column;overflow:hidden;}
 
 /* ============================================================================
    TYPOGRAPHY UTILITIES
