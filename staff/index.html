@@ -49,9 +49,10 @@ const App = {
       subtitle:'Sign in with the credentials your school provided.',
       badge:'Staff Access',
       badgeIcon:'shield',
-      orgCodeVisible:false,
+      orgCodeRequired:true,
       demoIdentifier:'principal@sunrise.edu',
       demoPassword:'Welcome@123',
+      demoOrgCode:'SPS-CHN',
       onSuccess:(user)=>{
         // set the active StaffDB user based on who logged in
         const matched=this.S.staffUsers().find(u=>u.email.toLowerCase()===user.email.toLowerCase());

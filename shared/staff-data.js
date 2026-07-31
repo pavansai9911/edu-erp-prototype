@@ -18,11 +18,35 @@
  */
 const StaffDB = {
   PFX:'eduerp_stf_',
+  DEMO_ORG_CODE:'SPS-CHN',
   COLS:{ ROLES:'roles', STAFF:'staff_users', LEADS:'leads', LEAVES:'leaves',
          APPLICATIONS:'applications', ATTENDANCE:'attendance', STAFF_ATT:'staff_attendance',
          ACADEMIC:'academic', SESSION_USER:'active_user',
          AUDIT_LOGS:'audit_logs', ROLE_ASSIGNMENTS:'role_assignments',
          NOTIF_DISPATCH:'notif_dispatch' },
+
+  /* ---- multi-tenant plumbing ------------------------------------------------
+     Every collection except STAFF is namespaced per org code, exactly like
+     FounderDB (see shared/founder-data.js) — a new school never sees another
+     school's roles/leads/leaves/audit trail/academic structure, while the
+     seeded demo org keeps its existing rich dataset.
+     STAFF is the one exception: it stays a single GLOBAL list (each record
+     tagged with its own orgCode) because Auth.login('staff') has to search it
+     by email BEFORE anyone knows which org is logging in — the same reason
+     FounderDB.founders() is un-partitioned. staffUsers() below filters that
+     global list down to the active org for every other use (directory,
+     hierarchy, reports, role checks, ...). */
+  _activeOrgCode(){
+    const s=(typeof Auth!=='undefined')?Auth.getSession():null;
+    if(s && s.app==='founder' && s.orgCode) return s.orgCode;
+    if(s && s.app==='staff'){
+      const su=this._allStaffUsers().find(u=>u.id===s.userId||u.id===s.staffId);
+      if(su && su.orgCode) return su.orgCode;
+    }
+    return this.DEMO_ORG_CODE;
+  },
+  _getGlobal(k){ try{ const d=sessionStorage.getItem(this.PFX+k); return d?JSON.parse(d):null; }catch{ return null; } },
+  _setGlobal(k,v){ sessionStorage.setItem(this.PFX+k,JSON.stringify(v)); },
 
   /* ======================================================================
      PERMISSION CATALOG — mirrors GET /permissions → ModulePermissionGroup[]
@@ -122,13 +146,19 @@ const StaffDB = {
   },
 
   init(){
-    if(!this._get('seeded_v2')){ this._seed(); this._set('seeded_v2',true); }
+    if(!this._get('seeded_v2')){ this._seedOrgData(this._activeOrgCode()); this._set('seeded_v2',true); }
     if(!this._get(this.COLS.SESSION_USER)) this.setActiveUser(this._defaultUserId());
   },
-  _get(k){ try{ const d=sessionStorage.getItem(this.PFX+k); return d?JSON.parse(d):null; }catch{ return null; } },
-  _set(k,v){ sessionStorage.setItem(this.PFX+k,JSON.stringify(v)); },
+  _get(k){ try{ const d=sessionStorage.getItem(this.PFX+this._activeOrgCode()+'_'+k); return d?JSON.parse(d):null; }catch{ return null; } },
+  _set(k,v){ sessionStorage.setItem(this.PFX+this._activeOrgCode()+'_'+k,JSON.stringify(v)); },
 
-  _seed(){
+  _seedOrgData(orgCode){
+    if(orgCode===this.DEMO_ORG_CODE) this._seedDemoSchool();
+    else this._seedFreshSchool(orgCode);
+  },
+
+  /* ---- seed the demo org's full rich dataset (unchanged from before) ---- */
+  _seedDemoSchool(){
     /* Seed roles with RoleOut + RoleDetailOut fields:
        public_id, role_name, role_code, is_system_role, hierarchy_level, description, is_active, permission_codes */
     const roles=Object.values(this.TEMPLATE_ROLES).map((r,i)=>({
@@ -162,7 +192,10 @@ const StaffDB = {
       {id:'USR-06',name:'Sneha Iyer',email:'sneha@sunrise.edu',password:DEMO_PW,designation:'Class Teacher',department:'Academics',reportsToId:'USR-01',roleId:roleId('TEACHER'),section:'5-A',avatar:'SI',passwordSet:true,
        public_id:'USR-06',full_name:'Sneha Iyer',phone_number:'+91 98450 10006',is_active:true,is_platform_admin:false,last_login_at:daysAgo(1),employee_code:'EMP-006',date_of_joining:'2024-06-01',employment_type:'full_time'},
     ];
-    this._set(this.COLS.STAFF,staff);
+    staff.forEach(u=>{ u.orgCode=this.DEMO_ORG_CODE; });
+    // STAFF is global (un-partitioned, see the multi-tenant plumbing note above) —
+    // append rather than overwrite so this never clobbers another org's staff.
+    this._setGlobal(this.COLS.STAFF,[...this._allStaffUsers(),...staff]);
 
     /* Seed RoleAssignmentOut records (mirrors POST /users/{id}/role-assignments) */
     const roleAssignments=staff.map(u=>({
@@ -387,6 +420,50 @@ const StaffDB = {
     this._set(this.COLS.ACADEMIC,{classLevels,sections,subjects,programs,academicSessions,classSubjectMappings});
   },
 
+  /* ---- seed a brand-new school onboarded via ERP Admin: the same 4 starting
+     role templates every school gets (legitimate defaults, not "sample data"),
+     the same 5 standard leave-type quotas, and otherwise zero content — no
+     leads/leaves/applications/attendance/audit trail/academic structure, since
+     a real day-1 school hasn't created any of that yet. No staff are seeded
+     here either: STAFF is the global, un-partitioned collection (see the
+     multi-tenant plumbing note near the top of this file) — a fresh org
+     simply has no staff of its own until its founder adds some. ---- */
+  _seedFreshSchool(orgCode){
+    const org=(typeof DB!=='undefined')?DB.orgs().find(o=>o.code===orgCode):null;
+    const roles=Object.values(this.TEMPLATE_ROLES).map((r,i)=>({
+      public_id:'ROLE-'+String(1+i), id:'ROLE-'+String(1+i),
+      role_name:r.role_name, role_code:r.role_code,
+      is_system_role:r.is_system_role, hierarchy_level:r.hierarchy_level,
+      description:r.description, is_active:true,
+      permission_codes:[...r.perms],
+      name:r.role_name, code:r.role_code, system:r.is_system_role,
+      desc:r.description, perms:[...r.perms],
+    }));
+    this._set(this.COLS.ROLES,roles);
+    this._set(this.COLS.LEADS,[]);
+    this._set(this.COLS.LEAVES,[]);
+    this._set(this.COLS.APPLICATIONS,[]);
+    this._set(this.COLS.ATTENDANCE,{});
+    this._set(this.COLS.STAFF_ATT,{});
+    this._set(this.COLS.AUDIT_LOGS,[]);
+    this._set(this.COLS.ROLE_ASSIGNMENTS,[]);
+    this._set(this.COLS.NOTIF_DISPATCH,[]);
+    this._set('leave_types',[
+      {leave_type_name:'Casual Leave',      default_annual_quota:12},
+      {leave_type_name:'Sick Leave',        default_annual_quota:10},
+      {leave_type_name:'Earned Leave',      default_annual_quota:15},
+      {leave_type_name:'Maternity Leave',   default_annual_quota:180},
+      {leave_type_name:'Compensatory Leave',default_annual_quota:null},
+    ]);
+    const academicSessions=org?[{
+      public_id:'SESS-01', id:'SESS-01',
+      session_label:org.session_label||org.academicYear||'',
+      start_date:org.session_start_date||'', end_date:org.session_end_date||'',
+      is_current:true, status:'active',
+    }]:[];
+    this._set(this.COLS.ACADEMIC,{classLevels:[],sections:[],subjects:[],programs:[],academicSessions,classSubjectMappings:{}});
+  },
+
   roles(){ return this._get(this.COLS.ROLES)||[]; },
   roleById(id){ return this.roles().find(r=>r.public_id===id||r.id===id); },
   roleByCode(code){ return this.roles().find(r=>r.role_code===code||r.code===code); },
@@ -445,13 +522,13 @@ const StaffDB = {
   },
 
   /* addStaff below already calls staffUsers() — defined later */
-  _defaultUserId(){ return 'USR-02'; },
+  _defaultUserId(){ const first=this.staffUsers()[0]; return first?first.id:'USR-02'; },
   /* addStaff — mirrors POST /staff (StaffCreate):
      required: branch_public_id, role_public_id, employee_code, designation, date_of_joining
      optional: full_name, email, phone_number, password, employment_type, reporting_to_user_public_id */
   addStaff({name,email,phone_number,password,designation,department,reportsToId,roleId,
              section,employee_code,date_of_joining,employment_type}){
-    const staff=this.staffUsers();
+    const staff=this._allStaffUsers();
     const empCode=employee_code||('EMP-'+String(Date.now()).slice(-5));
     const u={
       id:'USR-'+String(Date.now()).slice(-5),
@@ -460,6 +537,7 @@ const StaffDB = {
       full_name:name, name,
       email, phone_number:phone_number||null,
       branch_public_id:'BR-01', branch_code:'MAIN',
+      orgCode:this._activeOrgCode(),
       employee_code:empCode,
       designation,
       date_of_joining:date_of_joining||new Date().toISOString().split('T')[0],
@@ -472,16 +550,16 @@ const StaffDB = {
       avatar:initials(name), password:password||'', passwordSet:!!password,
       createdAt:new Date().toISOString(),
     };
-    staff.push(u); this._set(this.COLS.STAFF,staff); return u;
+    staff.push(u); this._setGlobal(this.COLS.STAFF,staff); return u;
   },
   updateStaff(id,patch){
-    const staff=this.staffUsers(); const u=staff.find(x=>x.id===id);
+    const staff=this._allStaffUsers(); const u=staff.find(x=>x.id===id);
     if(u){
       Object.assign(u,patch);
       // keep full_name and name in sync
       if(patch.name) u.full_name=patch.name;
       if(patch.full_name) u.name=patch.full_name;
-      this._set(this.COLS.STAFF,staff);
+      this._setGlobal(this.COLS.STAFF,staff);
     }
     return u;
   },
@@ -896,7 +974,11 @@ const StaffDB = {
      UserOut: public_id, full_name, email, phone_number, is_active,
               is_platform_admin, last_login_at
      ======================================================================== */
-  staffUsers(){ return this._get(this.COLS.STAFF)||[]; },
+  /* raw global list (all orgs) — used only for login lookup and for resolving
+     which org a staff session belongs to (see _activeOrgCode above) */
+  _allStaffUsers(){ return this._getGlobal(this.COLS.STAFF)||[]; },
+  /* the list every screen/report should use — this org's staff only */
+  staffUsers(){ return this._allStaffUsers().filter(u=>u.orgCode===this._activeOrgCode()); },
   staffUserById(id){ return this.staffUsers().find(u=>u.public_id===id||u.id===id); },
 
   /* mirrors GET /users → UserOut[] */
@@ -911,7 +993,7 @@ const StaffDB = {
 
   /* mirrors PATCH /users/{id} (UserUpdate) */
   updateUser(id, patch){
-    const staff=this.staffUsers(); const u=staff.find(x=>x.public_id===id||x.id===id);
+    const staff=this._allStaffUsers(); const u=staff.find(x=>x.public_id===id||x.id===id);
     if(!u) return null;
     const allowed=['full_name','email','phone_number','date_of_birth','gender','is_active'];
     allowed.forEach(k=>{
@@ -921,7 +1003,7 @@ const StaffDB = {
         if(k==='is_active' && !patch[k]) this._auditLog('USER_DEACTIVATED','User',id,`User ${u.full_name||u.name} deactivated`,this.activeUser().id);
       }
     });
-    this._set(this.COLS.STAFF,staff);
+    this._setGlobal(this.COLS.STAFF,staff);
     return u;
   },
 
@@ -936,8 +1018,8 @@ const StaffDB = {
   changeMyPassword({current_password, new_password}){
     const u=this.activeUser();
     if(u.password && u.password!==current_password) return {error:'Current password is incorrect.'};
-    const staff=this.staffUsers(); const me=staff.find(x=>x.id===u.id);
-    if(me){ me.password=new_password; me.passwordSet=true; this._set(this.COLS.STAFF,staff); }
+    const staff=this._allStaffUsers(); const me=staff.find(x=>x.id===u.id);
+    if(me){ me.password=new_password; me.passwordSet=true; this._setGlobal(this.COLS.STAFF,staff); }
     this._auditLog('PASSWORD_CHANGED','User',u.id,'User changed their own password',u.id);
     return {success:true};
   },
@@ -950,11 +1032,11 @@ const StaffDB = {
 
   /* mirrors POST /users/{id}/role-assignments (RoleAssignmentCreate) */
   assignRole(userId, {role_public_id, valid_from, valid_until}){
-    const staff=this.staffUsers(); const u=staff.find(x=>x.public_id===userId||x.id===userId);
+    const staff=this._allStaffUsers(); const u=staff.find(x=>x.public_id===userId||x.id===userId);
     if(!u) return null;
     const role=this.roleById(role_public_id);
     // Update staff record to reflect new primary role
-    u.roleId=role_public_id; this._set(this.COLS.STAFF,staff);
+    u.roleId=role_public_id; this._setGlobal(this.COLS.STAFF,staff);
     // Add RoleAssignmentOut record
     const assigns=this.roleAssignments();
     // Mark any existing assignment for this user as inactive

@@ -18,8 +18,10 @@ const AuthScreens = {
 
   /* ========================================================================
      LOGIN
-     opts: { app, title, subtitle, badge, badgeIcon, orgCodeVisible,
-             demoIdentifier, demoPassword, onSuccess(user) }
+     opts: { app, title, subtitle, badge, badgeIcon, orgCodeRequired,
+             demoIdentifier, demoPassword, demoOrgCode, onSuccess(user) }
+     orgCodeRequired: true for founder/staff (mandatory), false for admin
+     (field still shown, just optional — see EDU-002).
      ======================================================================== */
   Login(container,opts){
     this._ctx={...opts,container};
@@ -40,11 +42,12 @@ const AuthScreens = {
           <button class="input-group-btn" onclick="AuthScreens._togglePass(this)" aria-label="Show password">${icon('eye')}</button>
         </div>
       </div>
-      ${opts.orgCodeVisible?`
       <div class="field">
-        <label class="field-label">Organization code <span class="t-caption" style="font-weight:400">(optional)</span></label>
-        <input class="input" id="auth-org" type="text" placeholder="Only needed if you're prompted for it">
-      </div>`:`<p class="field-hint mb-3" style="margin-top:-8px">Platform admins sign in without an organization code.</p>`}
+        <label class="field-label">Organization code ${opts.orgCodeRequired?'<span class="req">*</span>':'<span class="t-caption" style="font-weight:400">(optional)</span>'}</label>
+        <input class="input t-code" id="auth-org" type="text" value="${opts.demoOrgCode||''}"
+          placeholder="${opts.orgCodeRequired?'e.g. SPS-CHN':'Only needed if you’re prompted for it'}"
+          ${opts.orgCodeRequired?'style="text-transform:uppercase" oninput="this.value=this.value.toUpperCase()"':''} autocomplete="off">
+      </div>
       <div class="flex between items-center mb-4"><span></span>
         <button class="sec-link" style="background:none;border:none;cursor:pointer" onclick="AuthScreens._goForgot()">Forgot password?</button>
       </div>
@@ -58,13 +61,15 @@ const AuthScreens = {
     const c=this._ctx;
     const identifier=document.getElementById('auth-id').value.trim();
     const password=document.getElementById('auth-pw').value;
+    const orgCode=document.getElementById('auth-org').value.trim();
     const err=document.getElementById('auth-err');
     err.innerHTML='';
     if(!identifier||!password){ err.innerHTML=`<div class="field-error mb-2">${icon('alert')} Enter your email and password.</div>`; return; }
+    if(c.orgCodeRequired && !orgCode){ err.innerHTML=`<div class="field-error mb-2">${icon('alert')} Enter your organization code.</div>`; return; }
     const btn=document.getElementById('auth-btn');
     btn.textContent='Signing in…'; btn.disabled=true;
     setTimeout(()=>{
-      const r=Auth.login(identifier,password,c.app);
+      const r=Auth.login(identifier,password,c.app,orgCode);
       if(r.success){ btn.textContent='Sign in'; btn.disabled=false; c.onSuccess(r.user); }
       else{
         err.innerHTML=`<div class="field-error mb-2">${icon('alert')} ${r.message}</div>`;
