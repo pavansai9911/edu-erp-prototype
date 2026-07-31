@@ -103,11 +103,14 @@ const Auth = {
   _start(data){
     const session={...data,loginTime:new Date().toISOString()};
     sessionStorage.setItem(this.SESSION_KEY,JSON.stringify(session));
-    // FounderDB.init() self-seeds once at page load, before anyone has logged
-    // in — so a login for a DIFFERENT org than whichever was active at load
-    // time needs to re-run it now that the session (and therefore the active
-    // org) has just changed, or that org's tenant data would never get seeded.
+    // FounderDB/StaffDB both self-seed once at page load, before anyone has
+    // logged in — so a login for a DIFFERENT org than whichever was active at
+    // load time needs to re-run init() now that the session (and therefore
+    // the active org) has just changed, or that org's tenant data would never
+    // get seeded. Founder logins carry orgCode directly; staff logins resolve
+    // their org from their own staff record (see StaffDB._activeOrgCode).
     if(data.app==='founder' && typeof FounderDB!=='undefined') FounderDB.init();
+    if((data.app==='founder'||data.app==='staff') && typeof StaffDB!=='undefined') StaffDB.init();
     return {success:true,user:session};
   },
 
