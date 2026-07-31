@@ -11,7 +11,7 @@
 const FounderDB = {
   PFX:'eduerp_fdr_',
   COLS:{ STUDENTS:'students', STAFF:'staff', INVOICES:'invoices', PAYMENTS:'payments',
-         BRANCHES:'branches', SETTINGS:'fdr_settings', FOUNDER_ID:'founder_identity',
+         BRANCHES:'branches', SETTINGS:'fdr_settings', FOUNDERS:'founders',
          FEE_HEADS:'fee_heads', FEE_STRUCTURES:'fee_structures', RECEIPTS:'receipts',
          DEPARTMENTS:'departments', ORG_SETTINGS:'org_settings',
          NOTIF_TEMPLATES:'notif_templates', NOTIF_PREFS:'notif_prefs' },
@@ -250,7 +250,18 @@ const FounderDB = {
     this._set(this.COLS.INVOICES,invoices);
     this._set(this.COLS.PAYMENTS,payments);
     this._set(this.COLS.SETTINGS,{schoolName:'Sunrise Public School',theme:'violet',mode:'system',activeBranch:'ALL'});
-    this._set(this.COLS.FOUNDER_ID,{name:'Rajesh Kumar',email:'rajesh@sunrise.edu',password:'Founder@123',avatar:'RK',orgCode:'SPS-CHN'});
+    // founders() is a LIST of valid Founder-app logins — the seeded demo founder,
+    // plus any founder ERP Admin's onboarding wizard provisions (see DB.onboardSchool
+    // in shared/data.js, which writes directly into this same sessionStorage key
+    // since the ERP Admin page doesn't load this module). If ERP Admin already
+    // onboarded a school in this browser tab BEFORE the Founder app's first load,
+    // that founder is already sitting in this list — merge the demo founder in
+    // rather than overwrite (or skip and lose the demo login entirely).
+    const founders=this._get(this.COLS.FOUNDERS)||[];
+    if(!founders.some(f=>f.email.toLowerCase()==='rajesh@sunrise.edu')){
+      founders.push({id:'FDR-DEMO',name:'Rajesh Kumar',email:'rajesh@sunrise.edu',password:'Founder@123',avatar:'RK',orgCode:'SPS-CHN'});
+    }
+    this._set(this.COLS.FOUNDERS,founders);
 
     /* Seed fee heads — mirrors FeeHeadOut: head_name, is_refundable, is_active */
     this._set(this.COLS.FEE_HEADS,[
@@ -403,8 +414,16 @@ const FounderDB = {
   invoices(){ return this._allInvoices().filter(i=>this._inBranch(i)); },
   payments(){ return this._allPayments().filter(p=>this._inBranch(p)); },
   settings(){ return this._get(this.COLS.SETTINGS)||{}; },
-  founderCredentials(){ return this._get(this.COLS.FOUNDER_ID)||{}; },
-  setFounderPassword(newPassword){ const fc=this.founderCredentials(); fc.password=newPassword; this._set(this.COLS.FOUNDER_ID,fc); },
+  /* founders() mirrors a list of Founder logins (one per onboarded school in
+     this browser tab's demo data). Auth.login('founder') searches this list. */
+  founders(){ return this._get(this.COLS.FOUNDERS)||[]; },
+  founderByEmail(email){ const em=(email||'').trim().toLowerCase(); return this.founders().find(f=>f.email.toLowerCase()===em); },
+  setFounderPassword(email,newPassword){
+    const em=(email||'').trim().toLowerCase();
+    const list=this.founders(); const f=list.find(x=>x.email.toLowerCase()===em);
+    if(f){ f.password=newPassword; this._set(this.COLS.FOUNDERS,list); }
+    return f;
+  },
   updateSettings(u){ this._set(this.COLS.SETTINGS,{...this.settings(),...u}); },
 
   /* ========== FEE HEADS — mirrors FeeHeadOut / FeeHeadCreate ========== */
