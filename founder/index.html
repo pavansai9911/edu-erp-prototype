@@ -1195,12 +1195,13 @@ const App = {
     const structs=this.F.feeStructures().filter(s=>s.is_active).length;
     const depts=this.F.activeDepartments().length;
     const branches=this.F.branches().filter(b=>b.is_active).length;
+    const mainBranch=this.F.branches().find(b=>b.is_active)||this.F.branches()[0];
     el.innerHTML=`
       <div class="sec-head"><div class="sec-title">School profile</div></div>
       <div class="card card-pad-0 mb-4"><div class="list">
         ${this.setupRow('building2','School name',set.schoolName)}
-        ${this.setupRow('mapPin','Branch','Main Campus · BR-MAIN')}
-        ${this.setupRow('calendar','Academic session','2026-27')}
+        ${this.setupRow('mapPin','Branch',mainBranch?`${mainBranch.branch_name} · ${mainBranch.branch_code}`:'—')}
+        ${this.setupRow('calendar','Academic session',set.sessionLabel||'—')}
       </div></div>
 
       <div class="sec-head"><div class="sec-title">Organisation structure</div></div>
@@ -1609,7 +1610,7 @@ const App = {
             <div class="t-h2">${s.structure_name}</div>
             <span class="chip ${s.is_active?'chip-success':'chip-neutral'}">${s.is_active?'Active':'Inactive'}</span>
           </div>
-          <div class="row-sub mb-2">Session 2026-27 · Main Campus</div>
+          <div class="row-sub mb-2">Session ${this.F.settings().sessionLabel||'—'} · ${(this.F.branches()[0]||{}).branch_name||'—'}</div>
           ${s.class_level_public_id?`<div class="row-sub">Class level: ${s.class_level_public_id}</div>`:'<div class="row-sub">Applies to all class levels</div>'}
         </div>
 

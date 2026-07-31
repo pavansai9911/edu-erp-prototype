@@ -10,19 +10,48 @@
  */
 const FounderDB = {
   PFX:'eduerp_fdr_',
+  DEMO_ORG_CODE:'SPS-CHN',
   COLS:{ STUDENTS:'students', STAFF:'staff', INVOICES:'invoices', PAYMENTS:'payments',
          BRANCHES:'branches', SETTINGS:'fdr_settings', FOUNDERS:'founders',
          FEE_HEADS:'fee_heads', FEE_STRUCTURES:'fee_structures', RECEIPTS:'receipts',
          DEPARTMENTS:'departments', ORG_SETTINGS:'org_settings',
          NOTIF_TEMPLATES:'notif_templates', NOTIF_PREFS:'notif_prefs' },
 
-  init(){ if(!this._get('seeded')){ this._seed(); this._set('seeded',true); } },
+  /* ---- multi-tenant plumbing ------------------------------------------------
+     Every collection EXCEPT founders() is namespaced per org code, so a newly
+     onboarded school (ERP Admin's Onboard wizard) never sees another school's
+     students/fees/staff/etc, while the seeded demo org (DEMO_ORG_CODE) keeps
+     its existing rich dataset exactly as before. founders() is deliberately
+     un-partitioned (see _getGlobal/_setGlobal) because it's the login
+     directory searched by email BEFORE we know which org is active. */
+  _activeOrgCode(){
+    const s=(typeof Auth!=='undefined')?Auth.getSession():null;
+    return (s && s.app==='founder' && s.orgCode) ? s.orgCode : this.DEMO_ORG_CODE;
+  },
+  _getGlobal(k){ try{ const d=sessionStorage.getItem(this.PFX+k); return d?JSON.parse(d):null; }catch{ return null; } },
+  _setGlobal(k,v){ sessionStorage.setItem(this.PFX+k,JSON.stringify(v)); },
 
-  _get(k){ try{ const d=sessionStorage.getItem(this.PFX+k); return d?JSON.parse(d):null; }catch{ return null; } },
-  _set(k,v){ sessionStorage.setItem(this.PFX+k,JSON.stringify(v)); },
+  init(){
+    // bootstrap the global founder-login directory (idempotent, not org-scoped)
+    const founders=this._getGlobal(this.COLS.FOUNDERS)||[];
+    if(!founders.some(f=>f.email.toLowerCase()==='rajesh@sunrise.edu')){
+      founders.push({id:'FDR-DEMO',name:'Rajesh Kumar',email:'rajesh@sunrise.edu',password:'Founder@123',avatar:'RK',orgCode:this.DEMO_ORG_CODE});
+      this._setGlobal(this.COLS.FOUNDERS,founders);
+    }
+    // seed the CURRENTLY ACTIVE org's own tenant data, once
+    if(!this._get('seeded')){ this._seedOrgData(this._activeOrgCode()); this._set('seeded',true); }
+  },
 
-  /* ---- seed one realistic school ---- */
-  _seed(){
+  _get(k){ try{ const d=sessionStorage.getItem(this.PFX+this._activeOrgCode()+'_'+k); return d?JSON.parse(d):null; }catch{ return null; } },
+  _set(k,v){ sessionStorage.setItem(this.PFX+this._activeOrgCode()+'_'+k,JSON.stringify(v)); },
+
+  _seedOrgData(orgCode){
+    if(orgCode===this.DEMO_ORG_CODE) this._seedDemoSchool();
+    else this._seedFreshSchool(orgCode);
+  },
+
+  /* ---- seed one realistic school (the demo org only) ---- */
+  _seedDemoSchool(){
     const sections=['Nursery-A','LKG-A','UKG-A','1-A','1-B','2-A','3-A','4-A','5-A'];
     /* Seed branches — mirrors BranchOut schema (openapi_july_11_a2.json) */
     const branches=[
@@ -249,19 +278,7 @@ const FounderDB = {
     this._set(this.COLS.STAFF,staff);
     this._set(this.COLS.INVOICES,invoices);
     this._set(this.COLS.PAYMENTS,payments);
-    this._set(this.COLS.SETTINGS,{schoolName:'Sunrise Public School',theme:'violet',mode:'system',activeBranch:'ALL'});
-    // founders() is a LIST of valid Founder-app logins — the seeded demo founder,
-    // plus any founder ERP Admin's onboarding wizard provisions (see DB.onboardSchool
-    // in shared/data.js, which writes directly into this same sessionStorage key
-    // since the ERP Admin page doesn't load this module). If ERP Admin already
-    // onboarded a school in this browser tab BEFORE the Founder app's first load,
-    // that founder is already sitting in this list — merge the demo founder in
-    // rather than overwrite (or skip and lose the demo login entirely).
-    const founders=this._get(this.COLS.FOUNDERS)||[];
-    if(!founders.some(f=>f.email.toLowerCase()==='rajesh@sunrise.edu')){
-      founders.push({id:'FDR-DEMO',name:'Rajesh Kumar',email:'rajesh@sunrise.edu',password:'Founder@123',avatar:'RK',orgCode:'SPS-CHN'});
-    }
-    this._set(this.COLS.FOUNDERS,founders);
+    this._set(this.COLS.SETTINGS,{schoolName:'Sunrise Public School',theme:'violet',mode:'system',activeBranch:'ALL',sessionLabel:'2026-27'});
 
     /* Seed fee heads — mirrors FeeHeadOut: head_name, is_refundable, is_active */
     this._set(this.COLS.FEE_HEADS,[
@@ -288,6 +305,77 @@ const FounderDB = {
         ],
         total_amount:'31200',
       },
+    ]);
+  },
+
+  /* ---- seed a brand-new school onboarded via ERP Admin: zero operational
+     content (no students/staff/fees/invoices/departments — a real day-1
+     school hasn't created any of that yet), but real identity/branch/session
+     details pulled from DB.orgs() (the record ERP Admin's onboarding wizard
+     created), plus the same sensible default settings/notification config
+     every school starts with (not "sample data" — legitimate defaults). ---- */
+  _seedFreshSchool(orgCode){
+    const org=(typeof DB!=='undefined')?DB.orgs().find(o=>o.code===orgCode):null;
+    const displayName=(org&&org.name)||'Your School';
+    const legalName=(org&&org.legal_name)||displayName;
+    const contactEmail=(org&&org.primary_contact_email)||'';
+    const city=(org&&org.city)||'';
+    const branchFromOrg=org&&org.branches&&org.branches[0];
+    const branchName=(branchFromOrg&&branchFromOrg.branch_name)||(org&&org.branch)||'Main Campus';
+    const branchCode=(branchFromOrg&&branchFromOrg.branch_code)||'MAIN';
+    const sessionLabel=(org&&org.session_label)||(org&&org.academicYear)||'';
+
+    this._set(this.COLS.STUDENTS,[]);
+    this._set(this.COLS.STAFF,[]);
+    this._set(this.COLS.INVOICES,[]);
+    this._set(this.COLS.PAYMENTS,[]);
+    this._set(this.COLS.RECEIPTS,[]);
+    this._set(this.COLS.DEPARTMENTS,[]);
+    this._set(this.COLS.FEE_HEADS,[]);
+    this._set(this.COLS.FEE_STRUCTURES,[]);
+    this._set(this.COLS.BRANCHES,[{
+      id:'BR-01', public_id:'BR-01', branch_name:branchName, branch_code:branchCode,
+      address_line1:null, address_line2:null,
+      city:city||null, state:null, postal_code:null, country_code:'IN',
+      geo_lat:null, geo_lng:null, is_active:true,
+      name:branchName, code:branchCode,
+    }]);
+    this._set(this.COLS.SETTINGS,{schoolName:displayName,theme:'violet',mode:'system',activeBranch:'ALL',sessionLabel});
+    this._set(this.COLS.ORG_SETTINGS,{
+      display_name:displayName, legal_name:legalName, institution_type_code:'K12',
+      primary_contact_email:contactEmail, primary_contact_phone:'', country_code:'IN', timezone:'Asia/Kolkata',
+      settings:{
+        academic_year_start_month:6, attendance_threshold_percent:75, grading_scale:'percentage',
+        late_fee_grace_days:7, allow_partial_payments:true, default_locale:'en',
+        school_timings_start:'08:00', school_timings_end:'16:00',
+      }
+    });
+    /* generic default templates (no hardcoded "Sunrise School" branding) — every
+       school starts with these, same event/channel shape as the demo org */
+    const tmpl=(code,channel,subject,body,active=true)=>({template_code:code,channel,locale:'en',subject_template:subject,body_template:body,is_active:active});
+    this._set(this.COLS.NOTIF_TEMPLATES,[
+      tmpl('FEE_REMINDER','email','Fee reminder for {{student_name}}','Dear Parent, the fee of ₹{{amount}} for {{student_name}} is due on {{due_date}}.'),
+      tmpl('FEE_REMINDER','sms',null,'Fee ₹{{amount}} due {{due_date}} for {{student_name}}.'),
+      tmpl('FEE_REMINDER','whatsapp',null,'📚 Fee reminder: ₹{{amount}} for {{student_name}} is due on {{due_date}}.'),
+      tmpl('ATTENDANCE_ALERT','sms',null,'{{student_name}} was marked absent today.'),
+      tmpl('ATTENDANCE_ALERT','whatsapp',null,'📋 {{student_name}} was marked absent today.',false),
+      tmpl('ATTENDANCE_ALERT','push','Attendance alert','{{student_name}} was marked absent today.'),
+      tmpl('LEAVE_DECISION','email','Your leave request has been {{status}}','Dear {{staff_name}}, your leave from {{from_date}} to {{to_date}} has been {{status}}.'),
+      tmpl('LEAVE_DECISION','internal',null,'Leave {{status}}: {{staff_name}} · {{from_date}} to {{to_date}}'),
+      tmpl('EXAM_SCHEDULE','email','Exam schedule for {{term}}','Dear Parent, exams for {{term}} begin on {{start_date}}. Please ensure {{student_name}} is prepared.',false),
+      tmpl('PAYMENT_RECEIPT','email','Payment receipt ₹{{amount}}','Receipt for ₹{{amount}} received from {{student_name}} via {{payment_mode}}. Receipt no: {{receipt_code}}.'),
+    ]);
+    this._set(this.COLS.NOTIF_PREFS,[
+      {event_category:'FEE_REMINDER',    channel:'email',    is_enabled:true},
+      {event_category:'FEE_REMINDER',    channel:'sms',      is_enabled:true},
+      {event_category:'FEE_REMINDER',    channel:'whatsapp', is_enabled:false},
+      {event_category:'ATTENDANCE_ALERT',channel:'sms',      is_enabled:true},
+      {event_category:'ATTENDANCE_ALERT',channel:'whatsapp', is_enabled:false},
+      {event_category:'ATTENDANCE_ALERT',channel:'push',     is_enabled:true},
+      {event_category:'LEAVE_DECISION',  channel:'email',    is_enabled:true},
+      {event_category:'LEAVE_DECISION',  channel:'internal', is_enabled:true},
+      {event_category:'EXAM_SCHEDULE',   channel:'email',    is_enabled:false},
+      {event_category:'PAYMENT_RECEIPT', channel:'email',    is_enabled:true},
     ]);
   },
 
@@ -414,14 +502,15 @@ const FounderDB = {
   invoices(){ return this._allInvoices().filter(i=>this._inBranch(i)); },
   payments(){ return this._allPayments().filter(p=>this._inBranch(p)); },
   settings(){ return this._get(this.COLS.SETTINGS)||{}; },
-  /* founders() mirrors a list of Founder logins (one per onboarded school in
-     this browser tab's demo data). Auth.login('founder') searches this list. */
-  founders(){ return this._get(this.COLS.FOUNDERS)||[]; },
+  /* founders() is the global (un-partitioned) login directory — see the
+     multi-tenant plumbing note near the top of this file. Auth.login('founder')
+     searches this list by email before any org-scoped data is ever touched. */
+  founders(){ return this._getGlobal(this.COLS.FOUNDERS)||[]; },
   founderByEmail(email){ const em=(email||'').trim().toLowerCase(); return this.founders().find(f=>f.email.toLowerCase()===em); },
   setFounderPassword(email,newPassword){
     const em=(email||'').trim().toLowerCase();
     const list=this.founders(); const f=list.find(x=>x.email.toLowerCase()===em);
-    if(f){ f.password=newPassword; this._set(this.COLS.FOUNDERS,list); }
+    if(f){ f.password=newPassword; this._setGlobal(this.COLS.FOUNDERS,list); }
     return f;
   },
   updateSettings(u){ this._set(this.COLS.SETTINGS,{...this.settings(),...u}); },
