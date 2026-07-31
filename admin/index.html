@@ -51,7 +51,7 @@ const App = {
   renderLogin(){
     AuthScreens.Login(document.getElementById('app'),{
       app:'admin', title:'ERP Admin', subtitle:'Sign in to onboard schools and manage the platform.',
-      badge:'Platform Console', badgeIcon:'shield', orgCodeVisible:false,
+      badge:'Platform Console', badgeIcon:'shield', orgCodeRequired:false,
       demoIdentifier:'admin@nextgeneduerp.com', demoPassword:'demo1234',
       onSuccess:(user)=>{ this.route='dashboard'; this.render(); UI.toast('Welcome back, '+user.name.split(' ')[0]); }
     });
@@ -673,7 +673,8 @@ const App = {
         <div class="state-title">${org.name} is live</div>
         <div class="state-msg">
           <b>${founder.name}</b> can now sign in to the Founder app with
-          <span class="t-code">${founder.email}</span>.
+          <span class="t-code">${founder.email}</span> and organization code
+          <span class="t-code">${d.orgCode}</span>.
           Branch <b>${d.branchName}</b> and session <b>${d.sessionLabel}</b> are ready.
         </div>
         <div class="flex gap-3 mt-4" style="width:100%">

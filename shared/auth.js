@@ -27,31 +27,50 @@ const Auth = {
   /**
    * Login. `app` scopes which credential source is checked, mirroring the
    * real multi-tenant login (LoginRequest.identifier + optional org_code):
-   *   'admin'   -> platform admins only (DB.COLS.ADMINS)
+   *   'admin'   -> platform admins only (DB.COLS.ADMINS) \u2014 org_code optional,
+   *                never validated (platform admins aren't tied to an org)
    *   'founder' -> any founder login, seeded or onboarded (FounderDB.founders())
-   *   'staff'   -> any seeded staff member (StaffDB.staffUsers())
+   *                \u2014 org_code mandatory, must match the founder's own org
+   *   'staff'   -> any staff member, seeded or created (StaffDB._allStaffUsers())
+   *                \u2014 org_code mandatory, must match the staff member's own org
    */
-  login(identifier,password,app){
+  login(identifier,password,app,orgCode){
     const em=(identifier||'').trim().toLowerCase();
+    const orgIn=(orgCode||'').trim().toUpperCase();
     const lockKey=app+':'+em;
     const lock=this._checkLockout(lockKey);
     if(lock.locked) return {success:false,code:429,message:`Too many attempts. Try again in ${lock.secondsLeft}s.`};
 
-    let account=null, sessionData=null;
+    let account=null, sessionData=null, orgMismatch=false;
     if(app==='admin'){
       account=DB.getAll(DB.COLS.ADMINS).find(u=>u.email.toLowerCase()===em && u.status==='active');
       if(account && account.password===password) sessionData={userId:account.id,name:account.name,email:account.email,role:account.role,app:'admin',avatar:account.avatar};
     }else if(app==='founder'){
       const fc=typeof FounderDB!=='undefined'?FounderDB.founderByEmail(em):null;
-      if(fc){ account=fc; if(fc.password===password) sessionData={userId:fc.id||'FDR-DEMO',name:fc.name,email:fc.email,role:'Founder',app:'founder',orgCode:fc.orgCode,avatar:fc.avatar}; }
+      if(fc){
+        account=fc;
+        if(fc.password===password){
+          if((fc.orgCode||'').toUpperCase()!==orgIn) orgMismatch=true;
+          else sessionData={userId:fc.id||'FDR-DEMO',name:fc.name,email:fc.email,role:'Founder',app:'founder',orgCode:fc.orgCode,avatar:fc.avatar};
+        }
+      }
     }else if(app==='staff'){
-      const su=typeof StaffDB!=='undefined'?StaffDB.staffUsers().find(u=>u.email.toLowerCase()===em):null;
-      if(su){ account=su; if(su.password===password) sessionData={userId:su.id,staffId:su.id,name:su.name,email:su.email,role:'Staff',app:'staff',avatar:su.avatar}; }
+      // must search the GLOBAL directory (not the org-filtered staffUsers()) \u2014
+      // at login time we don't yet know which org this person belongs to.
+      const su=typeof StaffDB!=='undefined'?StaffDB._allStaffUsers().find(u=>u.email.toLowerCase()===em):null;
+      if(su){
+        account=su;
+        if(su.password===password){
+          if((su.orgCode||'').toUpperCase()!==orgIn) orgMismatch=true;
+          else sessionData={userId:su.id,staffId:su.id,name:su.name,email:su.email,role:'Staff',app:'staff',avatar:su.avatar};
+        }
+      }
     }
 
     if(sessionData){ this._clearAttempts(lockKey); return this._start(sessionData); }
     this._recordAttempt(lockKey);
     if(!account) return {success:false,code:404,message:'We couldn\u2019t find an account with that email.'};
+    if(orgMismatch) return {success:false,code:403,message:'Incorrect organization code for this account.'};
     return {success:false,code:401,message:'Incorrect password. Please try again.'};
   },
 
@@ -94,7 +113,7 @@ const Auth = {
     let updated=false;
     if(app==='admin'){ const a=DB.getAll(DB.COLS.ADMINS).find(u=>u.email.toLowerCase()===em); if(a){ DB.update(DB.COLS.ADMINS,a.id,{password:newPassword}); updated=true; } }
     else if(app==='founder' && typeof FounderDB!=='undefined'){ if(FounderDB.founderByEmail(em)){ FounderDB.setFounderPassword(em,newPassword); updated=true; } }
-    else if(app==='staff' && typeof StaffDB!=='undefined'){ const su=StaffDB.staffUsers().find(u=>u.email.toLowerCase()===em); if(su){ StaffDB.updateStaff(su.id,{password:newPassword,passwordSet:true}); updated=true; } }
+    else if(app==='staff' && typeof StaffDB!=='undefined'){ const su=StaffDB._allStaffUsers().find(u=>u.email.toLowerCase()===em); if(su){ StaffDB.updateStaff(su.id,{password:newPassword,passwordSet:true}); updated=true; } }
     delete flow[key]; sessionStorage.setItem(this.RESET_KEY,JSON.stringify(flow));
     return updated?{success:true}:{success:false,message:'We couldn\u2019t find that account.'};
   },

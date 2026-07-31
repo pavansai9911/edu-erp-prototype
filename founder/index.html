@@ -47,9 +47,10 @@ const App = {
       subtitle:'Sign in to manage your school.',
       badge:'School Owner',
       badgeIcon:'building',
-      orgCodeVisible:false,
+      orgCodeRequired:true,
       demoIdentifier:'rajesh@sunrise.edu',
       demoPassword:'Founder@123',
+      demoOrgCode:'SPS-CHN',
       onSuccess:(user)=>{ this.render(); UI.toast('Welcome back, '+user.name.split(' ')[0]); }
     });
   },
